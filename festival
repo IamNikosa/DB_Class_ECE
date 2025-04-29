@@ -36,7 +36,8 @@ CREATE TABLE Festival (
     Start_Date DATE NOT NULL,
     End_Date DATE NOT NULL,
     Location_ID INT NOT NULL,
-    UNIQUE (Start_Date, Location_ID),
+    UNIQUE (Location_ID),
+    UNIQUE (Start_Date),
     FOREIGN KEY (Location_ID) REFERENCES Location(ID) ON DELETE CASCADE ON UPDATE CASCADE
 );
 
