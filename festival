@@ -1,9 +1,7 @@
-/* DDL ξεκινω να οριζω τις οντοτητες και δε βαζω καθολου κλειδια, μονο τ attributes για αρχη.
+/* DDL ξεκινω να οριζω τις οντοτητες και δε βαζω καθολου κλειδια, μονο τ attributes για αρχη. 
 Αυριο θα κανω σε χαρτι το σχημα να δω ποιες σχεσεις περιττευουν και τοτε θα φτιαξω εδω τους 
 πινακες των σχεσεων και θα βαλω κλειδια
  */
-
-
 DROP DATABASE IF EXISTS fest;
 CREATE DATABASE fest;
 USE fest;
@@ -67,18 +65,18 @@ CREATE TABLE Performer (
     Formation_Date DATE
 );
 
--- Create Performance table (Define PERF_TYPE as ENUM)`
 CREATE TABLE Performance (
     ID INT PRIMARY KEY,
-    Type VARCHAR(100) NOT NULL CHECK (Type IN ('Warm up', 'Head line', 'Special guest')),  -- Use CHECK constraint
+    Type VARCHAR(100) NOT NULL CHECK (Type IN ('Warm up', 'Head line', 'Special guest')),
     Start_Time TIME NOT NULL,
-    End_Time TIME NOT NULL,
+    Duration INT NOT NULL CHECK (Duration > 0 AND Duration <= 180),
     Performer_ID INT NOT NULL,
     Event_ID INT NOT NULL,
     UNIQUE (Event_ID, Performer_ID),
     FOREIGN KEY (Performer_ID) REFERENCES Performer(ID) ON DELETE CASCADE ON UPDATE CASCADE,
     FOREIGN KEY (Event_ID) REFERENCES Event(ID) ON DELETE CASCADE ON UPDATE CASCADE
 );
+
 
 -- Create Staff table
 CREATE TABLE Staff (
@@ -159,37 +157,41 @@ CREATE TABLE event_staff (
 ---------------------   T R I G G E R S ---------------------------------------------------------------------------
 -------------------------------------------------------------------------------------------------------------------
 
--- Create prevent_stage_overlap trigger
+-- Create trigger: FESTIVAL CANNOT BE CANCELDED
 DELIMITER $$
 
-CREATE TRIGGER prevent_stage_overlap
-BEFORE INSERT ON Event
+CREATE TRIGGER prevent_festival_cancellation
+BEFORE UPDATE ON Festival
 FOR EACH ROW
 BEGIN
-    DECLARE overlap_found INT;
-
-    -- Check for overlap
-    SELECT COUNT(*)
-    INTO overlap_found
-    FROM Event p
-    WHERE p.Stage_ID = NEW.Stage_ID
-      AND (
-           (NEW.Start_Time BETWEEN p.Start_Time AND p.End_Time)
-        OR (NEW.End_Time BETWEEN p.Start_Time AND p.End_Time)
-        OR (p.Start_Time BETWEEN NEW.Start_Time AND NEW.End_Time)
-        OR (p.End_Time BETWEEN NEW.Start_Time AND NEW.End_Time)
-      );
-
-    -- If overlap is found, signal an error
-    IF overlap_found > 0 THEN
+    -- Prevent the cancellation of festivals
+    IF OLD.End_Date IS NOT NULL AND NEW.End_Date IS NULL THEN
         SIGNAL SQLSTATE '45000'
-        SET MESSAGE_TEXT = 'Stage already occupied during this time.';
+        SET MESSAGE_TEXT = 'Festivals cannot be canceled.';
     END IF;
 END $$
 
-DELIMITER;
+DELIMITER ;
 
--- Create ensure_security_staff trigger
+
+-- Create trigger: EVENT CANNOT BE CANCELLED
+DELIMITER $$
+
+CREATE TRIGGER prevent_event_cancellation
+BEFORE UPDATE ON Event
+FOR EACH ROW
+BEGIN
+    -- Prevent the cancellation of events
+    IF NEW.Sold_Out = FALSE AND OLD.Sold_Out = TRUE THEN
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'Events cannot be canceled once they are marked as sold out.';
+    END IF;
+END $$
+
+DELIMITER ;
+
+
+-- Create trigger for SECURITY STAFF
 DELIMITER $$
 
 CREATE TRIGGER ensure_security_staff
@@ -219,7 +221,7 @@ END $$
 
 DELIMITER ;
 
--- Create ensure_support_staff trigger
+-- Create trigger for SUPPORT STAFF
 DELIMITER $$
 
 CREATE TRIGGER ensure_support_staff
@@ -250,7 +252,8 @@ END $$
 DELIMITER ;
 
 
--- Create check_performance_break trigger
+-- Create trigger for INTERVALS (from 5 to 30 mins) 
+-- between consecutive performances of the same event
 DELIMITER $$
 
 CREATE TRIGGER check_performance_break
@@ -281,129 +284,175 @@ END $$
 
 DELIMITER ;
 
--- Create check_performance_duration trigger
+
+-- Create trigger: NO OVERLAP OF EVENTS AT THE SAME STAGE
 DELIMITER $$
 
-CREATE TRIGGER check_performance_duration
+CREATE TRIGGER prevent_stage_overlap
+BEFORE INSERT ON Event
+FOR EACH ROW
+BEGIN
+    DECLARE overlap_found INT;
+
+    -- Check for overlap
+    SELECT COUNT(*)
+    INTO overlap_found
+    FROM Event p
+    WHERE p.Stage_ID = NEW.Stage_ID
+      AND (
+           (NEW.Start_Time BETWEEN p.Start_Time AND p.End_Time)
+        OR (NEW.End_Time BETWEEN p.Start_Time AND p.End_Time)
+        OR (p.Start_Time BETWEEN NEW.Start_Time AND NEW.End_Time)
+        OR (p.End_Time BETWEEN NEW.Start_Time AND NEW.End_Time)
+      );
+
+    -- If overlap is found, signal an error
+    IF overlap_found > 0 THEN
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'Stage already occupied during this time.';
+    END IF;
+END $$
+
+DELIMITER;
+
+
+-- Create trigger: NO DOUBLE BOOKING OF PERFORMERS
+DELIMITER $$
+
+CREATE TRIGGER prevent_overlapping_performances
 BEFORE INSERT ON Performance
 FOR EACH ROW
 BEGIN
-    DECLARE performance_duration INT;
+    DECLARE new_start TIME;
+    DECLARE new_end TIME;
 
-    -- Calculate the duration of the performance
-    SET performance_duration = TIMESTAMPDIFF(MINUTE, NEW.Start_Time, NEW.End_Time);
+    SET new_start = NEW.Start_Time;
+    SET new_end = ADDTIME(NEW.Start_Time, SEC_TO_TIME(NEW.Duration * 60));
 
-    -- If the duration exceeds 3 hours (180 minutes), raise an error
-    IF performance_duration > 180 THEN
-        SIGNAL SQLSTATE '45000'
-        SET MESSAGE_TEXT = 'Performance duration cannot exceed 3 hours.';
-    END IF;
-END $$
-
-DELIMITER ;
-
--- Create prevent_event_cancellation trigger
-DELIMITER $$
-
-CREATE TRIGGER prevent_event_cancellation
-BEFORE UPDATE ON Event
-FOR EACH ROW
-BEGIN
-    -- Prevent the cancellation of events
-    IF NEW.Sold_Out = FALSE AND OLD.Sold_Out = TRUE THEN
-        SIGNAL SQLSTATE '45000'
-        SET MESSAGE_TEXT = 'Events cannot be canceled once they are marked as sold out.';
-    END IF;
-END $$
-
-DELIMITER ;
-
--- Create prevent_festival_cancellation trigger
-DELIMITER $$
-
-CREATE TRIGGER prevent_festival_cancellation
-BEFORE UPDATE ON Festival
-FOR EACH ROW
-BEGIN
-    -- Prevent the cancellation of festivals
-    IF OLD.End_Date IS NOT NULL AND NEW.End_Date IS NULL THEN
-        SIGNAL SQLSTATE '45000'
-        SET MESSAGE_TEXT = 'Festivals cannot be canceled.';
-    END IF;
-END $$
-
-DELIMITER ;
-
-
--- Create trigger to prevent performers double booking
-DELIMITER $$
-
-CREATE TRIGGER prevent_double_booking
-BEFORE INSERT ON Performance
-FOR EACH ROW
-BEGIN
-    DECLARE perf_event_start TIMESTAMP;
-    DECLARE perf_event_end TIMESTAMP;
-
-    -- Get full datetime range for the event the performance is part of
-    SELECT e.Start_Time + INTERVAL NEW.Start_Time SECOND,
-           e.Start_Time + INTERVAL NEW.End_Time SECOND
-    INTO perf_event_start, perf_event_end
-    FROM Event e
-    WHERE e.ID = NEW.Event_ID;
-
-    -- Check 1: same performer already performing at the same time
+    -- 1. Same performer overlap check
     IF EXISTS (
         SELECT 1
         FROM Performance p
-        JOIN Event e ON p.Event_ID = e.ID
         WHERE p.Performer_ID = NEW.Performer_ID
+          AND p.Event_ID != NEW.Event_ID
           AND (
-            (perf_event_start BETWEEN e.Start_Time + INTERVAL p.Start_Time SECOND AND e.Start_Time + INTERVAL p.End_Time SECOND)
-         OR (perf_event_end BETWEEN e.Start_Time + INTERVAL p.Start_Time SECOND AND e.Start_Time + INTERVAL p.End_Time SECOND)
-         OR (e.Start_Time + INTERVAL p.Start_Time SECOND BETWEEN perf_event_start AND perf_event_end)
-         OR (e.Start_Time + INTERVAL p.End_Time SECOND BETWEEN perf_event_start AND perf_event_end)
+                (new_start BETWEEN p.Start_Time AND ADDTIME(p.Start_Time, SEC_TO_TIME(p.Duration * 60)))
+             OR (new_end BETWEEN p.Start_Time AND ADDTIME(p.Start_Time, SEC_TO_TIME(p.Duration * 60)))
+             OR (p.Start_Time BETWEEN new_start AND new_end)
+             OR (ADDTIME(p.Start_Time, SEC_TO_TIME(p.Duration * 60)) BETWEEN new_start AND new_end)
           )
     ) THEN
         SIGNAL SQLSTATE '45000'
-        SET MESSAGE_TEXT = 'This performer is already scheduled at overlapping time.';
+        SET MESSAGE_TEXT = 'Performer is already in a performance during this time.';
     END IF;
 
-    -- Check 2: If performer is an artist, ensure none of their bands are performing
+    -- 2. Artist’s bands overlap
     IF EXISTS (
         SELECT 1
         FROM Membership m
-        JOIN Performance p ON m.Band_ID = p.Performer_ID
-        JOIN Event e ON p.Event_ID = e.ID
+        JOIN Performance p ON p.Performer_ID = m.Band_ID
         WHERE m.Artist_ID = NEW.Performer_ID
           AND (
-            (perf_event_start BETWEEN e.Start_Time + INTERVAL p.Start_Time SECOND AND e.Start_Time + INTERVAL p.End_Time SECOND)
-         OR (perf_event_end BETWEEN e.Start_Time + INTERVAL p.Start_Time SECOND AND e.Start_Time + INTERVAL p.End_Time SECOND)
-         OR (e.Start_Time + INTERVAL p.Start_Time SECOND BETWEEN perf_event_start AND perf_event_end)
-         OR (e.Start_Time + INTERVAL p.End_Time SECOND BETWEEN perf_event_start AND perf_event_end)
+                (new_start BETWEEN p.Start_Time AND ADDTIME(p.Start_Time, SEC_TO_TIME(p.Duration * 60)))
+             OR (new_end BETWEEN p.Start_Time AND ADDTIME(p.Start_Time, SEC_TO_TIME(p.Duration * 60)))
+             OR (p.Start_Time BETWEEN new_start AND new_end)
+             OR (ADDTIME(p.Start_Time, SEC_TO_TIME(p.Duration * 60)) BETWEEN new_start AND new_end)
           )
     ) THEN
         SIGNAL SQLSTATE '45000'
-        SET MESSAGE_TEXT = 'This artist is a member of a band performing at the same time.';
+        SET MESSAGE_TEXT = 'One of the performer’s bands is already performing during this time.';
     END IF;
 
-    -- Check 3: If performer is a band, ensure none of its members are performing
+    -- 3. Band member overlap
     IF EXISTS (
         SELECT 1
         FROM Membership m
-        JOIN Performance p ON m.Artist_ID = p.Performer_ID
-        JOIN Event e ON p.Event_ID = e.ID
+        JOIN Performance p ON p.Performer_ID = m.Artist_ID
         WHERE m.Band_ID = NEW.Performer_ID
           AND (
-            (perf_event_start BETWEEN e.Start_Time + INTERVAL p.Start_Time SECOND AND e.Start_Time + INTERVAL p.End_Time SECOND)
-         OR (perf_event_end BETWEEN e.Start_Time + INTERVAL p.Start_Time SECOND AND e.Start_Time + INTERVAL p.End_Time SECOND)
-         OR (e.Start_Time + INTERVAL p.Start_Time SECOND BETWEEN perf_event_start AND perf_event_end)
-         OR (e.Start_Time + INTERVAL p.End_Time SECOND BETWEEN perf_event_start AND perf_event_end)
+                (new_start BETWEEN p.Start_Time AND ADDTIME(p.Start_Time, SEC_TO_TIME(p.Duration * 60)))
+             OR (new_end BETWEEN p.Start_Time AND ADDTIME(p.Start_Time, SEC_TO_TIME(p.Duration * 60)))
+             OR (p.Start_Time BETWEEN new_start AND new_end)
+             OR (ADDTIME(p.Start_Time, SEC_TO_TIME(p.Duration * 60)) BETWEEN new_start AND new_end)
           )
     ) THEN
         SIGNAL SQLSTATE '45000'
-        SET MESSAGE_TEXT = 'A member of this band is already performing at the same time.';
+        SET MESSAGE_TEXT = 'A member of the band is already performing during this time.';
     END IF;
+END $$
+
+DELIMITER ;
+
+
+-- Create trigger: AFTER DELETION OF PERFRORMANCE
+DELIMITER $$
+
+CREATE TRIGGER after_performance_delete
+AFTER DELETE ON Performance
+FOR EACH ROW
+BEGIN
+    -- Call the procedure to reschedule performances in the same event
+    CALL Reschedule_Performances_After_Deletion(OLD.Event_ID);
+END$$
+
+DELIMITER ;
+
+
+
+------------------------------------------------------------------------------------------------------------------
+--------------  P R O C E D U R E S ------------------------------------------------------------------------------
+------------------------------------------------------------------------------------------------------------------
+
+-- Create procedure: HANDLE DELETION OF PERFORMANCE
+DELIMITER $$
+
+CREATE PROCEDURE Reschedule_Performances_After_Deletion(IN deleted_event_id INT)
+BEGIN
+    DECLARE done INT DEFAULT 0;
+    DECLARE perf_id INT;
+    DECLARE perf_type VARCHAR(100);
+    DECLARE perf_duration INT;
+    DECLARE perf_performer INT;
+
+    DECLARE current_start TIME;
+    DECLARE cur CURSOR FOR
+        SELECT ID, Type, Duration, Performer_ID
+        FROM Performance
+        WHERE Event_ID = deleted_event_id
+        ORDER BY Start_Time ASC;
+
+    DECLARE CONTINUE HANDLER FOR NOT FOUND SET done = 1;
+
+    -- Step 1: Delete all performances for this event
+    DELETE FROM Performance WHERE Event_ID = deleted_event_id;
+
+    -- Step 2: Get event start time
+    SELECT Start_Time INTO current_start
+    FROM Event WHERE ID = deleted_event_id;
+
+    -- Step 3: Re-insert performances with 5 min gaps
+    OPEN cur;
+
+    read_loop: LOOP
+        FETCH cur INTO perf_id, perf_type, perf_duration, perf_performer;
+        IF done THEN
+            LEAVE read_loop;
+        END IF;
+
+        INSERT INTO Performance (ID, Type, Start_Time, Duration, Performer_ID, Event_ID)
+        VALUES (
+            perf_id, perf_type, current_start, perf_duration, perf_performer, deleted_event_id
+        );
+
+        -- Update start time for next performance: current + duration + 5 mins
+        SET current_start = ADDTIME(current_start, SEC_TO_TIME(perf_duration * 60 + 5 * 60));
+    END LOOP;
+
+    CLOSE cur;
+END$$
+
+DELIMITER ;
+
 
 END$$
 
