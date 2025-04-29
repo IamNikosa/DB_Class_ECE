@@ -191,6 +191,29 @@ END $$
 DELIMITER ;
 
 
+DELIMITER $$
+
+CREATE TRIGGER prevent_band_as_member
+BEFORE INSERT ON Membership
+FOR EACH ROW
+BEGIN
+    DECLARE is_band_member BOOLEAN;
+
+    -- Check if the performer being added as a member is a band
+    SELECT Is_Band INTO is_band_member
+    FROM Performer
+    WHERE ID = NEW.Artist_ID;
+
+    -- If the member is a band, prevent the insertion
+    IF is_band_member = TRUE THEN
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'A band cannot be a member of another band.';
+    END IF;
+END$$
+
+DELIMITER ;
+
+
 -- Create trigger for SECURITY STAFF
 DELIMITER $$
 
