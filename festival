@@ -2,6 +2,8 @@
 Αυριο θα κανω σε χαρτι το σχημα να δω ποιες σχεσεις περιττευουν και τοτε θα φτιαξω εδω τους 
 πινακες των σχεσεων και θα βαλω κλειδια
  */
+
+
 DROP DATABASE IF EXISTS fest;
 CREATE DATABASE fest;
 USE fest;
@@ -101,11 +103,43 @@ CREATE TABLE Technical_Staff (
     FOREIGN KEY (Staff_ID) REFERENCES Staff(ID) ON DELETE CASCADE ON UPDATE CASCADE
 );
 
+-- Membership table: Artist is member of Band
+CREATE TABLE Membership (
+    Band_ID INT NOT NULL,
+    Artist_ID INT NOT NULL,
+    Join_Date DATE,
+    PRIMARY KEY (Band_ID, Artist_ID),
+    FOREIGN KEY (Band_ID) REFERENCES Performer(ID) ON DELETE CASCADE ON UPDATE CASCADE,
+    FOREIGN KEY (Artist_ID) REFERENCES Performer(ID) ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+
 -- Create Genre table 
 CREATE TABLE Genre (
     ID INT PRIMARY KEY,
     Name VARCHAR(100)
 );
+
+
+-- Optional: Subgenre table
+CREATE TABLE Subgenre (
+    ID INT PRIMARY KEY,
+    Name VARCHAR(100) NOT NULL,
+    Genre_ID INT NOT NULL,
+    FOREIGN KEY (Genre_ID) REFERENCES Genre(ID) ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+
+
+-- Optional: Performer's Subgenres (many-to-many)
+CREATE TABLE Performer_Subgenre (
+    Performer_ID INT NOT NULL,
+    Subgenre_ID INT NOT NULL,
+    PRIMARY KEY (Performer_ID, Subgenre_ID),
+    FOREIGN KEY (Performer_ID) REFERENCES Performer(ID) ON DELETE CASCADE ON UPDATE CASCADE,
+    FOREIGN KEY (Subgenre_ID) REFERENCES Subgenre(ID) ON DELETE CASCADE ON UPDATE CASCADE
+);
+
 
 -- Create event_staff table 
 -- (Event is not null even though there is not full participation of staff in the relation.
@@ -119,6 +153,11 @@ CREATE TABLE event_staff (
     FOREIGN KEY (Staff_ID) REFERENCES Staff(ID) ON DELETE CASCADE ON UPDATE CASCADE,
     FOREIGN KEY (Event_ID) REFERENCES Event(ID) ON DELETE CASCADE ON UPDATE CASCADE
 );
+
+
+-------------------------------------------------------------------------------------------------------------------
+---------------------   T R I G G E R S ---------------------------------------------------------------------------
+-------------------------------------------------------------------------------------------------------------------
 
 -- Create prevent_stage_overlap trigger
 DELIMITER $$
@@ -292,5 +331,80 @@ BEGIN
         SET MESSAGE_TEXT = 'Festivals cannot be canceled.';
     END IF;
 END $$
+
+DELIMITER ;
+
+
+-- Create trigger to prevent performers double booking
+DELIMITER $$
+
+CREATE TRIGGER prevent_double_booking
+BEFORE INSERT ON Performance
+FOR EACH ROW
+BEGIN
+    DECLARE perf_event_start TIMESTAMP;
+    DECLARE perf_event_end TIMESTAMP;
+
+    -- Get full datetime range for the event the performance is part of
+    SELECT e.Start_Time + INTERVAL NEW.Start_Time SECOND,
+           e.Start_Time + INTERVAL NEW.End_Time SECOND
+    INTO perf_event_start, perf_event_end
+    FROM Event e
+    WHERE e.ID = NEW.Event_ID;
+
+    -- Check 1: same performer already performing at the same time
+    IF EXISTS (
+        SELECT 1
+        FROM Performance p
+        JOIN Event e ON p.Event_ID = e.ID
+        WHERE p.Performer_ID = NEW.Performer_ID
+          AND (
+            (perf_event_start BETWEEN e.Start_Time + INTERVAL p.Start_Time SECOND AND e.Start_Time + INTERVAL p.End_Time SECOND)
+         OR (perf_event_end BETWEEN e.Start_Time + INTERVAL p.Start_Time SECOND AND e.Start_Time + INTERVAL p.End_Time SECOND)
+         OR (e.Start_Time + INTERVAL p.Start_Time SECOND BETWEEN perf_event_start AND perf_event_end)
+         OR (e.Start_Time + INTERVAL p.End_Time SECOND BETWEEN perf_event_start AND perf_event_end)
+          )
+    ) THEN
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'This performer is already scheduled at overlapping time.';
+    END IF;
+
+    -- Check 2: If performer is an artist, ensure none of their bands are performing
+    IF EXISTS (
+        SELECT 1
+        FROM Membership m
+        JOIN Performance p ON m.Band_ID = p.Performer_ID
+        JOIN Event e ON p.Event_ID = e.ID
+        WHERE m.Artist_ID = NEW.Performer_ID
+          AND (
+            (perf_event_start BETWEEN e.Start_Time + INTERVAL p.Start_Time SECOND AND e.Start_Time + INTERVAL p.End_Time SECOND)
+         OR (perf_event_end BETWEEN e.Start_Time + INTERVAL p.Start_Time SECOND AND e.Start_Time + INTERVAL p.End_Time SECOND)
+         OR (e.Start_Time + INTERVAL p.Start_Time SECOND BETWEEN perf_event_start AND perf_event_end)
+         OR (e.Start_Time + INTERVAL p.End_Time SECOND BETWEEN perf_event_start AND perf_event_end)
+          )
+    ) THEN
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'This artist is a member of a band performing at the same time.';
+    END IF;
+
+    -- Check 3: If performer is a band, ensure none of its members are performing
+    IF EXISTS (
+        SELECT 1
+        FROM Membership m
+        JOIN Performance p ON m.Artist_ID = p.Performer_ID
+        JOIN Event e ON p.Event_ID = e.ID
+        WHERE m.Band_ID = NEW.Performer_ID
+          AND (
+            (perf_event_start BETWEEN e.Start_Time + INTERVAL p.Start_Time SECOND AND e.Start_Time + INTERVAL p.End_Time SECOND)
+         OR (perf_event_end BETWEEN e.Start_Time + INTERVAL p.Start_Time SECOND AND e.Start_Time + INTERVAL p.End_Time SECOND)
+         OR (e.Start_Time + INTERVAL p.Start_Time SECOND BETWEEN perf_event_start AND perf_event_end)
+         OR (e.Start_Time + INTERVAL p.End_Time SECOND BETWEEN perf_event_start AND perf_event_end)
+          )
+    ) THEN
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'A member of this band is already performing at the same time.';
+    END IF;
+
+END$$
 
 DELIMITER ;
