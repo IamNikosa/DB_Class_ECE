@@ -29,6 +29,14 @@ CREATE TABLE Stage (
     Tech_Info VARCHAR(255) NOT NULL
 );
 
+CREATE TABLE Visitor (
+    ID INT PRIMARY KEY,
+    First_Name VARCHAR(100),
+    Last_Name VARCHAR(100),
+    Age INT,
+    Con_Info VARCHAR(255)
+);
+
 -- Create Festival table
 CREATE TABLE Festival (
     ID INT PRIMARY KEY,
@@ -52,6 +60,23 @@ CREATE TABLE Event (
     UNIQUE (Festival_ID, Stage_ID, Start_Time),
     FOREIGN KEY (Festival_ID) REFERENCES Festival(ID) ON DELETE CASCADE ON UPDATE CASCADE,
     FOREIGN KEY (Stage_ID) REFERENCES Stage(ID) ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+CREATE TABLE Resale_Queue (
+    ID INT PRIMARY KEY,
+    Activated BOOLEAN,
+    Activation_Date DATE,
+    Event_ID INT,
+    UNIQUE (Event_ID),
+    FOREIGN KEY (Event_ID) REFERENCES Event(ID)
+);
+
+CREATE TABLE Buy_Queue (
+    ID INT PRIMARY KEY,
+    Ticket_Category VARCHAR(100),
+    Event_ID INT,
+    Timestamp DATETIME,
+    FOREIGN KEY (Event_ID) REFERENCES Event(ID)
 );
 
 -- Create Performer table
@@ -153,6 +178,93 @@ CREATE TABLE event_staff (
     FOREIGN KEY (Event_ID) REFERENCES Event(ID) ON DELETE CASCADE ON UPDATE CASCADE
 );
 
+CREATE TABLE Type (
+    Name VARCHAR(100) PRIMARY KEY
+);
+
+CREATE TABLE Payment (
+    Name VARCHAR(100) PRIMARY KEY
+);
+
+CREATE TABLE Ticket (
+    ID INT PRIMARY KEY,
+    EAN_URL VARCHAR(200),
+    Stage_Info VARCHAR(300),
+    Price DECIMAL(10,2),
+    Activated BOOLEAN DEFAULT FALSE,
+    Date_Bought DATE,
+    Type_ID VARCHAR(100),
+    Payment_ID VARCHAR(100),
+    Event_ID INT,
+    UNIQUE (EAN_URL),
+    FOREIGN KEY (Type_ID) REFERENCES Type(Name),
+    FOREIGN KEY (Payment_ID) REFERENCES Payment(Name),
+    FOREIGN KEY (Event_ID) REFERENCES Event(ID)
+);
+
+CREATE TABLE Tickets_In_Resale (
+    Ticket_ID INT PRIMARY KEY,
+    Resale_Queue_ID INT,
+    FOREIGN KEY (Ticket_ID) REFERENCES Ticket(ID),
+    FOREIGN KEY (Resale_Queue_ID) REFERENCES Resale_Queue(ID)
+);
+
+CREATE TABLE Spectator (
+    Visitor_ID INT,
+    Ticket_ID INT,
+    PRIMARY KEY (Visitor_ID, Ticket_ID),
+    FOREIGN KEY (Visitor_ID) REFERENCES Visitor(ID),
+    FOREIGN KEY (Ticket_ID) REFERENCES Ticket(ID)
+);
+
+CREATE TABLE Visitor_Interested_Event (
+    Event_ID INT,
+    Visitor_ID INT,
+    PRIMARY KEY (Event_ID, Visitor_ID),
+    FOREIGN KEY (Event_ID) REFERENCES Event(ID),
+    FOREIGN KEY (Visitor_ID) REFERENCES Visitor(ID)
+);
+
+CREATE TABLE Visitor_Waitlisted (
+    Buy_Queue_ID INT,
+    Visitor_ID INT,
+    PRIMARY KEY (Buy_Queue_ID, Visitor_ID),
+    FOREIGN KEY (Buy_Queue_ID) REFERENCES Buy_Queue(ID),
+    FOREIGN KEY (Visitor_ID) REFERENCES Visitor(ID)
+);
+
+CREATE TABLE Transaction (
+    ID INT PRIMARY KEY,
+    Is_Resale BOOLEAN,
+    Ticket_ID INT,
+    Buyer_ID INT,
+    UNIQUE (Ticket_ID, Buyer_ID),
+    FOREIGN KEY (Ticket_ID) REFERENCES Ticket(ID),
+    FOREIGN KEY (Buyer_ID) REFERENCES Visitor(ID)
+);
+
+CREATE TABLE Visitor_Sold_Ticket (
+    Seller_ID INT,
+    Ticket_ID INT,
+    Transaction_ID INT,
+    PRIMARY KEY (Seller_ID, Ticket_ID),
+    FOREIGN KEY (Seller_ID) REFERENCES Visitor(ID),
+    FOREIGN KEY (Ticket_ID) REFERENCES Ticket(ID),
+    FOREIGN KEY (Transaction_ID) REFERENCES Transaction(ID)
+);
+
+CREATE TABLE Review (
+    ID INT PRIMARY KEY AUTO_INCREMENT,
+    Interpretation INT,
+    Sound INT,
+    Lighting INT,
+    Stage_Presence INT,
+    Organization INT,
+    Overall INT,
+    Ticket_ID INT,
+    UNIQUE (Ticket_ID),
+    FOREIGN KEY (Ticket_ID) REFERENCES Ticket(ID)
+);
 
 -------------------------------------------------------------------------------------------------------------------
 ---------------------   T R I G G E R S ---------------------------------------------------------------------------
@@ -192,6 +304,7 @@ END $$
 DELIMITER ;
 
 
+-- Create trigger: BAND CANNOT BE MEMBER OF BAND
 DELIMITER $$
 
 CREATE TRIGGER prevent_band_as_member
@@ -453,6 +566,7 @@ END$$
 
 DELIMITER ;
 
+
 ------------------------------------------------------------------------------------------------------------------
 --------------  P R O C E D U R E S ------------------------------------------------------------------------------
 ------------------------------------------------------------------------------------------------------------------
@@ -503,11 +617,6 @@ BEGIN
     END LOOP;
 
     CLOSE cur;
-END$$
-
-DELIMITER ;
-
-
 END$$
 
 DELIMITER ;
