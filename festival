@@ -1,0 +1,296 @@
+/* DDL ξεκινω να οριζω τις οντοτητες και δε βαζω καθολου κλειδια, μονο τ attributes για αρχη. 
+Αυριο θα κανω σε χαρτι το σχημα να δω ποιες σχεσεις περιττευουν και τοτε θα φτιαξω εδω τους 
+πινακες των σχεσεων και θα βαλω κλειδια
+ */
+DROP DATABASE IF EXISTS fest;
+CREATE DATABASE fest;
+USE fest;
+
+-- Create Location table 
+CREATE TABLE Location (
+    ID INT PRIMARY KEY,
+    Name VARCHAR(100) NOT NULL,
+    Latitude DECIMAL(9,6) NOT NULL,
+    Longitude DECIMAL(9,6) NOT NULL,
+    Address VARCHAR(100) NOT NULL,
+    City VARCHAR(100) NOT NULL,
+    Country VARCHAR(100) NOT NULL,
+    Continent VARCHAR(100) NOT NULL,
+    UNIQUE (Latitude, Longitude),
+    UNIQUE (Address, City, Country, Continent)
+);
+
+-- Create Stage table (renamed the second Stage table to Performer_Stage)
+CREATE TABLE Stage (
+    ID INT PRIMARY KEY,
+    Name VARCHAR(100) NOT NULL,
+    Description VARCHAR(255),
+    Capacity INT NOT NULL,
+    Tech_Info VARCHAR(255) NOT NULL
+);
+
+-- Create Festival table
+CREATE TABLE Festival (
+    ID INT PRIMARY KEY,
+    Name VARCHAR(100) NOT NULL,
+    Start_Date DATE NOT NULL,
+    End_Date DATE NOT NULL,
+    Location_ID INT NOT NULL,
+    UNIQUE (Start_Date, Location_ID),
+    FOREIGN KEY (Location_ID) REFERENCES Location(ID) ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+-- Create Event table (Removed PERIOD FOR syntax)
+CREATE TABLE Event (
+    ID INT PRIMARY KEY,
+    Start_Time TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    End_Time TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    Sold_Out BOOLEAN NOT NULL,
+    Festival_ID INT NOT NULL,
+    Stage_ID INT NOT NULL,
+    UNIQUE (Festival_ID, Stage_ID, Start_Time),
+    FOREIGN KEY (Festival_ID) REFERENCES Festival(ID) ON DELETE CASCADE ON UPDATE CASCADE,
+    FOREIGN KEY (Stage_ID) REFERENCES Stage(ID) ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+-- Create Performer table
+CREATE TABLE Performer (
+    ID INT PRIMARY KEY,
+    Real_Name VARCHAR(100),
+    Stage_Name VARCHAR(100) NOT NULL,
+    Birthday DATE,
+    Instagram VARCHAR(100),
+    Website VARCHAR(100),
+    Is_Band BOOLEAN NOT NULL,
+    Formation_Date DATE
+);
+
+-- Create Performance table (Define PERF_TYPE as ENUM)`
+CREATE TABLE Performance (
+    ID INT PRIMARY KEY,
+    Type VARCHAR(100) NOT NULL CHECK (Type IN ('Warm up', 'Head line', 'Special guest')),  -- Use CHECK constraint
+    Start_Time TIME NOT NULL,
+    End_Time TIME NOT NULL,
+    Performer_ID INT NOT NULL,
+    Event_ID INT NOT NULL,
+    UNIQUE (Event_ID, Performer_ID),
+    FOREIGN KEY (Performer_ID) REFERENCES Performer(ID) ON DELETE CASCADE ON UPDATE CASCADE,
+    FOREIGN KEY (Event_ID) REFERENCES Event(ID) ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+-- Create Staff table
+CREATE TABLE Staff (
+    ID INT PRIMARY KEY,
+    Name VARCHAR(100) NOT NULL,
+    Age INT NOT NULL CHECK (Age > 0),
+    Type VARCHAR(100) NOT NULL CHECK (Type IN ('Trainee', 'Beginner', 'Intermediate', 'Experienced', 'Very Experienced'))
+);
+
+CREATE TABLE Support_Staff (
+    Staff_ID INT PRIMARY KEY,
+    FOREIGN KEY (Staff_ID) REFERENCES Staff(ID) ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+CREATE TABLE Security_Staff (
+    Staff_ID INT PRIMARY KEY,
+    FOREIGN KEY (Staff_ID) REFERENCES Staff(ID) ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+CREATE TABLE Technical_Staff (
+    Staff_ID INT PRIMARY KEY,
+    FOREIGN KEY (Staff_ID) REFERENCES Staff(ID) ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+-- Create Genre table 
+CREATE TABLE Genre (
+    ID INT PRIMARY KEY,
+    Name VARCHAR(100)
+);
+
+-- Create event_staff table 
+-- (Event is not null even though there is not full participation of staff in the relation.
+--  This happens because unemployed staff members are not mentioned in any tupple participating in the relationship,
+--  due to on delete cascade constraint. So in order to detect unemployed staff members we simply search for them in 
+--  the relationship table.)
+CREATE TABLE event_staff (
+    Staff_ID INT NOT NULL,
+    Event_ID INT NOT NULL,
+    PRIMARY KEY (Staff_ID, Event_ID),
+    FOREIGN KEY (Staff_ID) REFERENCES Staff(ID) ON DELETE CASCADE ON UPDATE CASCADE,
+    FOREIGN KEY (Event_ID) REFERENCES Event(ID) ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+-- Create prevent_stage_overlap trigger
+DELIMITER $$
+
+CREATE TRIGGER prevent_stage_overlap
+BEFORE INSERT ON Event
+FOR EACH ROW
+BEGIN
+    DECLARE overlap_found INT;
+
+    -- Check for overlap
+    SELECT COUNT(*)
+    INTO overlap_found
+    FROM Event p
+    WHERE p.Stage_ID = NEW.Stage_ID
+      AND (
+           (NEW.Start_Time BETWEEN p.Start_Time AND p.End_Time)
+        OR (NEW.End_Time BETWEEN p.Start_Time AND p.End_Time)
+        OR (p.Start_Time BETWEEN NEW.Start_Time AND NEW.End_Time)
+        OR (p.End_Time BETWEEN NEW.Start_Time AND NEW.End_Time)
+      );
+
+    -- If overlap is found, signal an error
+    IF overlap_found > 0 THEN
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'Stage already occupied during this time.';
+    END IF;
+END $$
+
+DELIMITER;
+
+-- Create ensure_security_staff trigger
+DELIMITER $$
+
+CREATE TRIGGER ensure_security_staff
+BEFORE INSERT ON event_staff
+FOR EACH ROW
+BEGIN
+    DECLARE total_capacity INT;
+    DECLARE security_count INT;
+
+    -- Get the total capacity of the stage for the event
+    SELECT Capacity INTO total_capacity
+    FROM Stage
+    WHERE ID = (SELECT Stage_ID FROM Event WHERE ID = NEW.Event_ID);
+
+    -- Get the count of security staff for the event
+    SELECT COUNT(*) INTO security_count
+    FROM event_staff es
+    JOIN Security_Staff ss ON es.Staff_ID = ss.Staff_ID
+    WHERE es.Event_ID = NEW.Event_ID;
+
+    -- Ensure there are at least 5% security staff
+    IF security_count < (total_capacity * 0.05) THEN
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'Security staff should be at least 5% of the total capacity.';
+    END IF;
+END $$
+
+DELIMITER ;
+
+-- Create ensure_support_staff trigger
+DELIMITER $$
+
+CREATE TRIGGER ensure_support_staff
+BEFORE INSERT ON event_staff
+FOR EACH ROW
+BEGIN
+    DECLARE total_capacity INT;
+    DECLARE support_count INT;
+
+    -- Get the total capacity of the stage for the event
+    SELECT Capacity INTO total_capacity
+    FROM Stage
+    WHERE ID = (SELECT Stage_ID FROM Event WHERE ID = NEW.Event_ID);
+
+    -- Get the count of support staff for the event
+    SELECT COUNT(*) INTO support_count
+    FROM event_staff es
+    JOIN Support_Staff ss ON es.Staff_ID = ss.Staff_ID
+    WHERE es.Event_ID = NEW.Event_ID;
+
+    -- Ensure there are at least 2% support staff
+    IF support_count < (total_capacity * 0.02) THEN
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'Support staff should be at least 2% of the total capacity.';
+    END IF;
+END $$
+
+DELIMITER ;
+
+
+-- Create check_performance_break trigger
+DELIMITER $$
+
+CREATE TRIGGER check_performance_break
+BEFORE INSERT ON Performance
+FOR EACH ROW
+BEGIN
+    DECLARE last_end_time TIME;
+    DECLARE time_diff INT;
+
+    -- Get the end time of the last performance in the event for the same stage
+    SELECT End_Time INTO last_end_time
+    FROM Performance
+    WHERE Event_ID = NEW.Event_ID
+      AND Performer_ID != NEW.Performer_ID
+    ORDER BY End_Time DESC LIMIT 1;
+
+    -- If a performance already exists, check the time difference
+    IF last_end_time IS NOT NULL THEN
+        SET time_diff = TIMESTAMPDIFF(MINUTE, last_end_time, NEW.Start_Time);
+
+        -- Check if the break is between 5 and 30 minutes
+        IF time_diff < 5 OR time_diff > 30 THEN
+            SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'There must be a break between 5 and 30 minutes between performances.';
+        END IF;
+    END IF;
+END $$
+
+DELIMITER ;
+
+-- Create check_performance_duration trigger
+DELIMITER $$
+
+CREATE TRIGGER check_performance_duration
+BEFORE INSERT ON Performance
+FOR EACH ROW
+BEGIN
+    DECLARE performance_duration INT;
+
+    -- Calculate the duration of the performance
+    SET performance_duration = TIMESTAMPDIFF(MINUTE, NEW.Start_Time, NEW.End_Time);
+
+    -- If the duration exceeds 3 hours (180 minutes), raise an error
+    IF performance_duration > 180 THEN
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'Performance duration cannot exceed 3 hours.';
+    END IF;
+END $$
+
+DELIMITER ;
+
+-- Create prevent_event_cancellation trigger
+DELIMITER $$
+
+CREATE TRIGGER prevent_event_cancellation
+BEFORE UPDATE ON Event
+FOR EACH ROW
+BEGIN
+    -- Prevent the cancellation of events
+    IF NEW.Sold_Out = FALSE AND OLD.Sold_Out = TRUE THEN
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'Events cannot be canceled once they are marked as sold out.';
+    END IF;
+END $$
+
+DELIMITER ;
+
+-- Create prevent_festival_cancellation trigger
+DELIMITER $$
+
+CREATE TRIGGER prevent_festival_cancellation
+BEFORE UPDATE ON Festival
+FOR EACH ROW
+BEGIN
+    -- Prevent the cancellation of festivals
+    IF OLD.End_Date IS NOT NULL AND NEW.End_Date IS NULL THEN
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'Festivals cannot be canceled.';
+    END IF;
+END $$
+
+DELIMITER ;
