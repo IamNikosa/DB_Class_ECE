@@ -422,6 +422,36 @@ END$$
 DELIMITER ;
 
 
+-- Create trigger: ARTIST CANNOT PRTICIPATE FOR FOUR CONSECUTIVE YEARS
+DELIMITER $$
+
+CREATE TRIGGER prevent_fourth_consecutive_year
+BEFORE INSERT ON Performance
+FOR EACH ROW
+BEGIN
+    DECLARE perf_year INT;
+    DECLARE consecutive_count INT;
+
+    -- Πάρε το έτος του event στο οποίο πάει να συμμετάσχει ο performer
+    SELECT YEAR(Start_Date) INTO perf_year
+    FROM Event
+    WHERE ID = NEW.Event_ID;
+
+    -- Πόσα από τα προηγούμενα 3 έτη έχει συμμετάσχει ο performer;
+    SELECT COUNT(DISTINCT YEAR(e.Start_Date)) INTO consecutive_count
+    FROM Performance p
+    JOIN Event e ON e.ID = p.Event_ID
+    WHERE p.Performer_ID = NEW.Performer_ID
+      AND YEAR(e.Start_Date) BETWEEN perf_year - 3 AND perf_year - 1;
+
+    -- Έχει ήδη 3 συνεχόμενα έτη παρουσίας;
+    IF consecutive_count = 3 THEN
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'Ο performer δεν μπορεί να συμμετέχει για 4η συνεχόμενη χρονιά.';
+    END IF;
+END$$
+
+DELIMITER ;
 
 ------------------------------------------------------------------------------------------------------------------
 --------------  P R O C E D U R E S ------------------------------------------------------------------------------
