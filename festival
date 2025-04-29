@@ -328,67 +328,6 @@ END$$
 DELIMITER ;
 
 
--- Create trigger for SECURITY STAFF
-DELIMITER $$
-
-CREATE TRIGGER ensure_security_staff
-BEFORE INSERT ON event_staff
-FOR EACH ROW
-BEGIN
-    DECLARE total_capacity INT;
-    DECLARE security_count INT;
-
-    -- Get the total capacity of the stage for the event
-    SELECT Capacity INTO total_capacity
-    FROM Stage
-    WHERE ID = (SELECT Stage_ID FROM Event WHERE ID = NEW.Event_ID);
-
-    -- Get the count of security staff for the event
-    SELECT COUNT(*) INTO security_count
-    FROM event_staff es
-    JOIN Security_Staff ss ON es.Staff_ID = ss.Staff_ID
-    WHERE es.Event_ID = NEW.Event_ID;
-
-    -- Ensure there are at least 5% security staff
-    IF security_count < (total_capacity * 0.05) THEN
-        SIGNAL SQLSTATE '45000'
-        SET MESSAGE_TEXT = 'Security staff should be at least 5% of the total capacity.';
-    END IF;
-END $$
-
-DELIMITER ;
-
--- Create trigger for SUPPORT STAFF
-DELIMITER $$
-
-CREATE TRIGGER ensure_support_staff
-BEFORE INSERT ON event_staff
-FOR EACH ROW
-BEGIN
-    DECLARE total_capacity INT;
-    DECLARE support_count INT;
-
-    -- Get the total capacity of the stage for the event
-    SELECT Capacity INTO total_capacity
-    FROM Stage
-    WHERE ID = (SELECT Stage_ID FROM Event WHERE ID = NEW.Event_ID);
-
-    -- Get the count of support staff for the event
-    SELECT COUNT(*) INTO support_count
-    FROM event_staff es
-    JOIN Support_Staff ss ON es.Staff_ID = ss.Staff_ID
-    WHERE es.Event_ID = NEW.Event_ID;
-
-    -- Ensure there are at least 2% support staff
-    IF support_count < (total_capacity * 0.02) THEN
-        SIGNAL SQLSTATE '45000'
-        SET MESSAGE_TEXT = 'Support staff should be at least 2% of the total capacity.';
-    END IF;
-END $$
-
-DELIMITER ;
-
-
 -- Create trigger for INTERVALS (from 5 to 30 mins) 
 -- between consecutive performances of the same event
 DELIMITER $$
@@ -567,6 +506,39 @@ END$$
 DELIMITER ;
 
 
+-- Create trigger: STAFF MUST NOT BE INSUFFICIENT
+DELIMITER $$
+
+CREATE TRIGGER trg_autofill_staff_after_spectator_insert
+AFTER INSERT ON Spectator
+FOR EACH ROW
+BEGIN
+    DECLARE event_id INT;
+
+    SELECT Event_ID INTO event_id
+    FROM Ticket
+    WHERE ID = NEW.Ticket_ID;
+
+    CALL AutoAssignStaff(event_id);
+END;
+//
+
+CREATE TRIGGER trg_autofill_staff_after_spectator_delete
+AFTER DELETE ON Spectator
+FOR EACH ROW
+BEGIN
+    DECLARE event_id INT;
+
+    SELECT Event_ID INTO event_id
+    FROM Ticket
+    WHERE ID = OLD.Ticket_ID;
+
+    CALL AutoAssignStaff(event_id);
+END;
+//
+
+DELIMITER ;
+
 ------------------------------------------------------------------------------------------------------------------
 --------------  P R O C E D U R E S ------------------------------------------------------------------------------
 ------------------------------------------------------------------------------------------------------------------
@@ -620,3 +592,67 @@ BEGIN
 END$$
 
 DELIMITER ;
+
+
+--Create procedure that validates staff coverage and autoassigns more staff if neeeded
+DELIMITER $$
+
+CREATE PROCEDURE AutoAssignStaff(IN p_Event_ID INT)
+BEGIN
+    DECLARE v_TotalSpectators INT DEFAULT 0;
+    DECLARE v_RequiredSecurity INT DEFAULT 0;
+    DECLARE v_RequiredSupport INT DEFAULT 0;
+    DECLARE v_CurrentSecurity INT DEFAULT 0;
+    DECLARE v_CurrentSupport INT DEFAULT 0;
+
+    -- Get number of spectators
+    SELECT COUNT(*) INTO v_TotalSpectators
+    FROM Spectator S
+    JOIN Ticket T ON S.Ticket_ID = T.ID
+    WHERE T.Event_ID = p_Event_ID;
+
+    -- Calculate required staff
+    SET v_RequiredSecurity = CEIL(0.05 * v_TotalSpectators);
+    SET v_RequiredSupport = CEIL(0.02 * v_TotalSpectators);
+
+    -- Get current counts
+    SELECT COUNT(*) INTO v_CurrentSecurity
+    FROM event_staff es
+    JOIN Security_Staff ss ON es.Staff_ID = ss.Staff_ID
+    WHERE es.Event_ID = p_Event_ID;
+
+    SELECT COUNT(*) INTO v_CurrentSupport
+    FROM event_staff es
+    JOIN Support_Staff ss ON es.Staff_ID = ss.Staff_ID
+    WHERE es.Event_ID = p_Event_ID;
+
+    -- Assign additional security staff if needed
+    WHILE v_CurrentSecurity < v_RequiredSecurity DO
+        INSERT INTO event_staff (Staff_ID, Event_ID)
+        SELECT ss.Staff_ID, p_Event_ID
+        FROM Security_Staff ss
+        WHERE ss.Staff_ID NOT IN (
+            SELECT Staff_ID FROM event_staff WHERE Event_ID = p_Event_ID
+        )
+        LIMIT 1;
+
+        SET v_CurrentSecurity = v_CurrentSecurity + 1;
+    END WHILE;
+
+    -- Assign additional support staff if needed
+    WHILE v_CurrentSupport < v_RequiredSupport DO
+        INSERT INTO event_staff (Staff_ID, Event_ID)
+        SELECT ss.Staff_ID, p_Event_ID
+        FROM Support_Staff ss
+        WHERE ss.Staff_ID NOT IN (
+            SELECT Staff_ID FROM event_staff WHERE Event_ID = p_Event_ID
+        )
+        LIMIT 1;
+
+        SET v_CurrentSupport = v_CurrentSupport + 1;
+    END WHILE;
+END;
+//
+
+DELIMITER ;
+
