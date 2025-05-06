@@ -266,6 +266,50 @@ CREATE TABLE Review (
     FOREIGN KEY (Ticket_ID) REFERENCES Ticket(ID)
 );
 
+
+--visitor id used in review
+ALTER TABLE Review
+ADD COLUMN Visitor_ID INT NOT NULL,
+ADD CONSTRAINT fk_reviewer FOREIGN KEY (Visitor_ID) REFERENCES Visitor(ID),
+ADD CONSTRAINT uc_reviewer_per_ticket UNIQUE (Visitor_ID, Ticket_ID);
+
+
+--images
+
+CREATE TABLE Image (
+    ID INT PRIMARY KEY AUTO_INCREMENT,
+    URL VARCHAR(255),
+    Description VARCHAR(255)
+);
+
+CREATE TABLE Festival_Image (
+    Festival_ID INT,
+    Image_ID INT,
+    PRIMARY KEY (Festival_ID, Image_ID),
+    FOREIGN KEY (Festival_ID) REFERENCES Festival(ID),
+    FOREIGN KEY (Image_ID) REFERENCES Image(ID)
+);
+
+CREATE TABLE Performer_Image (
+    Performer_ID INT,
+    Image_ID INT,
+    PRIMARY KEY (Performer_ID, Image_ID),
+    FOREIGN KEY (Performer_ID) REFERENCES Performer(ID) ON DELETE CASCADE,
+    FOREIGN KEY (Image_ID) REFERENCES Image(ID) ON DELETE CASCADE
+);
+
+
+CREATE TABLE Stage_Image (
+    Stage_ID INT,
+    Image_ID INT,
+    PRIMARY KEY (Stage_ID, Image_ID),
+    FOREIGN KEY (Stage_ID) REFERENCES Stage(ID) ON DELETE CASCADE,
+    FOREIGN KEY (Image_ID) REFERENCES Image(ID) ON DELETE CASCADE
+);
+
+
+
+
 -------------------------------------------------------------------------------------------------------------------
 ---------------------   T R I G G E R S ---------------------------------------------------------------------------
 -------------------------------------------------------------------------------------------------------------------
@@ -273,13 +317,16 @@ CREATE TABLE Review (
 -- Create trigger: FESTIVAL CANNOT BE CANCELDED
 DELIMITER $$
 
-CREATE TRIGGER prevent_festival_deletion
-BEFORE DELETE ON Festival
+CREATE TRIGGER prevent_festival_cancellation
+BEFORE UPDATE ON Festival
 FOR EACH ROW
 BEGIN
-    SIGNAL SQLSTATE '45000'
-    SET MESSAGE_TEXT = 'Festival deletion is not allowed.';
-END$$
+    -- Prevent the cancellation of festivals
+    IF OLD.End_Date IS NOT NULL AND NEW.End_Date IS NULL THEN
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'Festivals cannot be canceled.';
+    END IF;
+END $$
 
 DELIMITER ;
 
@@ -287,13 +334,16 @@ DELIMITER ;
 -- Create trigger: EVENT CANNOT BE CANCELLED
 DELIMITER $$
 
-CREATE TRIGGER prevent_event_deletion
-BEFORE DELETE ON Event
+CREATE TRIGGER prevent_event_cancellation
+BEFORE UPDATE ON Event
 FOR EACH ROW
 BEGIN
-    SIGNAL SQLSTATE '45000'
-    SET MESSAGE_TEXT = 'Event deletion is not allowed.';
-END$$
+    -- Prevent the cancellation of events
+    IF NEW.Sold_Out = FALSE AND OLD.Sold_Out = TRUE THEN
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'Events cannot be canceled once they are marked as sold out.';
+    END IF;
+END $$
 
 DELIMITER ;
 
@@ -533,6 +583,171 @@ END;
 
 DELIMITER ;
 
+
+DELIMITER $$
+
+-- Έλεγχος χωρητικότητας σκηνής
+CREATE TRIGGER trg_check_stage_capacity
+BEFORE INSERT ON Spectator
+FOR EACH ROW
+BEGIN
+    DECLARE v_Event_ID INT;
+    DECLARE v_Stage_ID INT;
+    DECLARE v_Capacity INT;
+    DECLARE v_Current_Count INT;
+
+    -- Βρες το Event του εισιτηρίου
+    SELECT Event_ID INTO v_Event_ID
+    FROM Ticket
+    WHERE ID = NEW.Ticket_ID;
+
+    -- Βρες τη σκηνή και τη χωρητικότητα
+    SELECT Stage_ID INTO v_Stage_ID
+    FROM Event
+    WHERE ID = v_Event_ID;
+
+    SELECT Capacity INTO v_Capacity
+    FROM Stage
+    WHERE ID = v_Stage_ID;
+
+    -- Υπολόγισε ήδη καταχωρημένους θεατές
+    SELECT COUNT(*) INTO v_Current_Count
+    FROM Spectator S
+    JOIN Ticket T ON S.Ticket_ID = T.ID
+    WHERE T.Event_ID = v_Event_ID;
+
+    -- Έλεγχος υπέρβασης
+    IF v_Current_Count >= v_Capacity THEN
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'Η χωρητικότητα της σκηνής έχει καλυφθεί για αυτή την εκδήλωση.';
+    END IF;
+END$$
+
+DELIMITER ;
+
+
+--Ένα εισιτήριο ανά επισκέπτη, ανά ημέρα και εκδήλωση
+DELIMITER $$
+
+CREATE TRIGGER trg_one_ticket_per_visitor_per_day_event
+BEFORE INSERT ON Spectator
+FOR EACH ROW
+BEGIN
+    DECLARE v_Visitor_ID INT;
+    DECLARE v_Event_ID INT;
+    DECLARE v_Event_Date DATE;
+    DECLARE v_Conflict_Count INT;
+
+    SET v_Visitor_ID = NEW.Visitor_ID;
+
+    SELECT Event_ID INTO v_Event_ID
+    FROM Ticket
+    WHERE ID = NEW.Ticket_ID;
+
+    SELECT DATE(Start_Time) INTO v_Event_Date
+    FROM Event
+    WHERE ID = v_Event_ID;
+
+    SELECT COUNT(*) INTO v_Conflict_Count
+    FROM Spectator S
+    JOIN Ticket T ON S.Ticket_ID = T.ID
+    JOIN Event E ON T.Event_ID = E.ID
+    WHERE S.Visitor_ID = v_Visitor_ID
+      AND DATE(E.Start_Time) = v_Event_Date;
+
+    IF v_Conflict_Count > 0 THEN
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'Ο επισκέπτης έχει ήδη εισιτήριο για αυτή την ημερομηνία.';
+    END IF;
+END$$
+
+DELIMITER ;
+
+
+--VIP ≤ 10% της χωρητικότητας σκηνής
+
+DELIMITER $$
+
+CREATE TRIGGER trg_check_vip_limit
+BEFORE INSERT ON Ticket
+FOR EACH ROW
+BEGIN
+    DECLARE v_Event_ID INT;
+    DECLARE v_Stage_ID INT;
+    DECLARE v_Capacity INT;
+    DECLARE v_VIP_Count INT;
+    DECLARE v_Limit INT;
+
+    IF NEW.Type_ID = 'VIP' THEN
+        SET v_Event_ID = NEW.Event_ID;
+
+        SELECT Stage_ID INTO v_Stage_ID
+        FROM Event
+        WHERE ID = v_Event_ID;
+
+        SELECT Capacity INTO v_Capacity
+        FROM Stage
+        WHERE ID = v_Stage_ID;
+
+        SELECT COUNT(*) INTO v_VIP_Count
+        FROM Ticket
+        WHERE Event_ID = v_Event_ID AND Type_ID = 'VIP';
+
+        SET v_Limit = FLOOR(0.10 * v_Capacity);
+
+        IF v_VIP_Count >= v_Limit THEN
+            SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'Το όριο VIP εισιτηρίων έχει ήδη καλυφθεί για αυτή την σκηνή.';
+        END IF;
+    END IF;
+END$$
+
+DELIMITER ;
+
+--trigger for inserting a review only when ticket is activated and also
+--when the visitor is the owner of the ticket
+
+DELIMITER $$
+
+CREATE TRIGGER trg_check_valid_review
+BEFORE INSERT ON Review
+FOR EACH ROW
+BEGIN
+    DECLARE v_Activated BOOLEAN;
+    DECLARE v_Match INT;
+
+    -- Έλεγχος αν το εισιτήριο είναι ενεργοποιημένο
+    SELECT Activated INTO v_Activated
+    FROM Ticket
+    WHERE ID = NEW.Ticket_ID;
+
+    IF v_Activated = FALSE THEN
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'Το εισιτήριο δεν έχει ενεργοποιηθεί. Δεν μπορείτε να υποβάλετε αξιολόγηση.';
+    END IF;
+
+    -- Έλεγχος αν ο visitor κατέχει αυτό το εισιτήριο
+    SELECT COUNT(*) INTO v_Match
+    FROM Spectator
+    WHERE Visitor_ID = NEW.Visitor_ID AND Ticket_ID = NEW.Ticket_ID;
+
+    IF v_Match = 0 THEN
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'Δεν είστε κάτοχος αυτού του εισιτηρίου.';
+    END IF;
+END$$
+
+DELIMITER ;
+
+
+
+
+
+
+
+
+
+
 ------------------------------------------------------------------------------------------------------------------
 --------------  P R O C E D U R E S ------------------------------------------------------------------------------
 ------------------------------------------------------------------------------------------------------------------
@@ -649,4 +864,195 @@ END;
 //
 
 DELIMITER ;
+
+
+--Procedure to scan ticket
+DELIMITER $$
+
+CREATE PROCEDURE ScanTicket(IN p_Ticket_ID INT)
+BEGIN
+    DECLARE v_Activated BOOLEAN;
+
+    SELECT Activated INTO v_Activated
+    FROM Ticket
+    WHERE ID = p_Ticket_ID;
+
+    IF v_Activated THEN
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'Το εισιτήριο έχει ήδη ενεργοποιηθεί.';
+    ELSE
+        UPDATE Ticket
+        SET Activated = TRUE
+        WHERE ID = p_Ticket_ID;
+    END IF;
+END$$
+
+DELIMITER ;
+
+
+--Procedure to Activate Resale If Sold Out
+
+DELIMITER $$
+
+CREATE PROCEDURE Activate_Resale_If_Sold_Out(IN p_Event_ID INT)
+BEGIN
+    DECLARE v_Stage_Capacity INT;
+    DECLARE v_Tickets_Sold INT;
+
+    -- Πάρε χωρητικότητα σκηνής
+    SELECT S.Capacity INTO v_Stage_Capacity
+    FROM Event E
+    JOIN Stage S ON E.Stage_ID = S.ID
+    WHERE E.ID = p_Event_ID;
+
+    -- Πάρε αριθμό θεατών
+    SELECT COUNT(*) INTO v_Tickets_Sold
+    FROM Spectator SP
+    JOIN Ticket T ON SP.Ticket_ID = T.ID
+    WHERE T.Event_ID = p_Event_ID;
+
+    -- Αν η σκηνή γέμισε, ενεργοποίησε την ουρά
+    IF v_Tickets_Sold >= v_Stage_Capacity THEN
+        UPDATE Resale_Queue
+        SET Activated = TRUE, Activation_Date = CURDATE()
+        WHERE Event_ID = p_Event_ID;
+    END IF;
+END$$
+
+DELIMITER ;
+
+
+--Procedure to Sell Unused Ticket
+
+DELIMITER $$
+
+CREATE PROCEDURE Sell_Unused_Ticket(IN p_Visitor_ID INT, IN p_Ticket_ID INT)
+BEGIN
+    DECLARE v_Event_ID INT;
+    DECLARE v_Queue_ID INT;
+    DECLARE v_Activated BOOLEAN;
+    
+    -- Ελέγχει αν το εισιτήριο είναι ανενεργό
+    SELECT Activated INTO v_Activated
+    FROM Ticket
+    WHERE ID = p_Ticket_ID;
+
+    IF v_Activated THEN
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'Το εισιτήριο έχει ήδη ενεργοποιηθεί και δεν μπορεί να μεταπωληθεί.';
+    END IF;
+
+    -- Βρες το Event και την αντίστοιχη ουρά
+    SELECT Event_ID INTO v_Event_ID
+    FROM Ticket
+    WHERE ID = p_Ticket_ID;
+
+    SELECT ID INTO v_Queue_ID
+    FROM Resale_Queue
+    WHERE Event_ID = v_Event_ID AND Activated = TRUE;
+
+    -- Εισαγωγή εισιτηρίου στην ουρά μεταπώλησης
+    INSERT INTO Tickets_In_Resale (Ticket_ID, Resale_Queue_ID)
+    VALUES (p_Ticket_ID, v_Queue_ID);
+END$$
+
+DELIMITER ;
+
+
+--Procedure to register buyer
+
+DELIMITER $$
+
+CREATE PROCEDURE Register_Buyer(
+    IN p_Event_ID INT,
+    IN p_Category VARCHAR(100)
+)
+BEGIN
+    INSERT INTO Buy_Queue (Ticket_Category, Event_ID, Timestamp)
+    VALUES (p_Category, p_Event_ID, NOW());
+END$$
+
+DELIMITER ;
+
+
+--Procedure to process resale queue
+
+DELIMITER $$
+
+CREATE PROCEDURE Process_Resale_Queue(IN p_Event_ID INT)
+BEGIN
+    DECLARE v_Ticket_ID INT;
+    DECLARE v_Buyer_ID INT;
+    DECLARE v_Category VARCHAR(100);
+    DECLARE v_Queue_ID INT;
+    DECLARE v_Buy_Queue_ID INT;
+    DECLARE done BOOLEAN DEFAULT FALSE;
+
+    -- Cursor για διαθέσιμα εισιτήρια προς μεταπώληση
+    DECLARE ticket_cursor CURSOR FOR
+        SELECT TIR.Ticket_ID
+        FROM Tickets_In_Resale TIR
+        JOIN Ticket T ON T.ID = TIR.Ticket_ID
+        WHERE T.Event_ID = p_Event_ID;
+
+    DECLARE CONTINUE HANDLER FOR NOT FOUND SET done = TRUE;
+
+    OPEN ticket_cursor;
+
+    read_loop: LOOP
+        FETCH ticket_cursor INTO v_Ticket_ID;
+        IF done THEN
+            LEAVE read_loop;
+        END IF;
+
+        -- Πάρε κατηγορία εισιτηρίου
+        SELECT Type_ID INTO v_Category
+        FROM Ticket
+        WHERE ID = v_Ticket_ID;
+
+        -- Βρες τον πρώτο αγοραστή (Visitor_ID + Buy_Queue_ID) με subquery
+        SELECT sub.Visitor_ID, sub.Buy_Queue_ID INTO v_Buyer_ID, v_Buy_Queue_ID
+        FROM (
+            SELECT VWE.Visitor_ID, BQ.ID AS Buy_Queue_ID
+            FROM Visitor_Waitlisted VWE
+            JOIN Buy_Queue BQ ON VWE.Buy_Queue_ID = BQ.ID
+            WHERE BQ.Event_ID = p_Event_ID AND BQ.Ticket_Category = v_Category
+            ORDER BY BQ.Timestamp ASC
+            LIMIT 1
+        ) AS sub;
+
+        -- Αν υπάρχει αγοραστής, προχώρα σε μεταπώληση
+        IF v_Buyer_ID IS NOT NULL THEN
+            -- Διαγραφή προηγούμενου κατόχου
+            DELETE FROM Spectator
+            WHERE Ticket_ID = v_Ticket_ID;
+
+            -- Προσθήκη νέου κατόχου
+            INSERT INTO Spectator (Visitor_ID, Ticket_ID)
+            VALUES (v_Buyer_ID, v_Ticket_ID);
+
+            -- Καταγραφή της συναλλαγής
+            INSERT INTO Transaction (ID, Is_Resale, Ticket_ID, Buyer_ID)
+            VALUES (UUID_SHORT(), TRUE, v_Ticket_ID, v_Buyer_ID);
+
+            -- Αφαίρεση από Tickets_In_Resale
+            DELETE FROM Tickets_In_Resale
+            WHERE Ticket_ID = v_Ticket_ID;
+
+            -- Αφαίρεση από Visitor_Waitlisted
+            DELETE FROM Visitor_Waitlisted
+            WHERE Buy_Queue_ID = v_Buy_Queue_ID AND Visitor_ID = v_Buyer_ID;
+
+            -- Αφαίρεση από Buy_Queue
+            DELETE FROM Buy_Queue
+            WHERE ID = v_Buy_Queue_ID;
+        END IF;
+    END LOOP;
+
+    CLOSE ticket_cursor;
+END$$
+
+DELIMITER ;
+
+
 
