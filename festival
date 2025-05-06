@@ -273,16 +273,13 @@ CREATE TABLE Review (
 -- Create trigger: FESTIVAL CANNOT BE CANCELDED
 DELIMITER $$
 
-CREATE TRIGGER prevent_festival_cancellation
-BEFORE UPDATE ON Festival
+CREATE TRIGGER prevent_festival_deletion
+BEFORE DELETE ON Festival
 FOR EACH ROW
 BEGIN
-    -- Prevent the cancellation of festivals
-    IF OLD.End_Date IS NOT NULL AND NEW.End_Date IS NULL THEN
-        SIGNAL SQLSTATE '45000'
-        SET MESSAGE_TEXT = 'Festivals cannot be canceled.';
-    END IF;
-END $$
+    SIGNAL SQLSTATE '45000'
+    SET MESSAGE_TEXT = 'Festival deletion is not allowed.';
+END$$
 
 DELIMITER ;
 
@@ -290,16 +287,13 @@ DELIMITER ;
 -- Create trigger: EVENT CANNOT BE CANCELLED
 DELIMITER $$
 
-CREATE TRIGGER prevent_event_cancellation
-BEFORE UPDATE ON Event
+CREATE TRIGGER prevent_event_deletion
+BEFORE DELETE ON Event
 FOR EACH ROW
 BEGIN
-    -- Prevent the cancellation of events
-    IF NEW.Sold_Out = FALSE AND OLD.Sold_Out = TRUE THEN
-        SIGNAL SQLSTATE '45000'
-        SET MESSAGE_TEXT = 'Events cannot be canceled once they are marked as sold out.';
-    END IF;
-END $$
+    SIGNAL SQLSTATE '45000'
+    SET MESSAGE_TEXT = 'Event deletion is not allowed.';
+END$$
 
 DELIMITER ;
 
