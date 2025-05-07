@@ -1,0 +1,260 @@
+import random
+import os
+import math # Needed for ceil
+import mysql.connector
+from faker import Faker
+
+# ---------------- CONFIG ----------------
+db_config = {
+    'host': 'localhost',
+    'user': 'root',
+    'password': '',
+    'database': 'Fest'
+}
+
+# Connect to the database
+conn = mysql.connector.connect(**db_config)
+conn.autocommit = True
+cursor = conn.cursor()
+# By default MySQL does not commit DELETE, INSERT, UPDATE unless you say conn.commit. 
+# I set conn.autocommit = True so that all the changes are not committed manually with conn.commit.
+
+def get_stage_capacity(stage_id_to_find):
+    if conn.is_connected():
+        query = "SELECT Capacity FROM Stage WHERE ID = %s"
+        cursor.execute(query, (stage_id_to_find,))
+        result = cursor.fetchone()
+
+        if result:
+            capacity = result[0] # Return the capacity value
+            return capacity
+        else:
+            print(f"No stage found with stage_id: {stage_id_to_find}")
+            return 0
+    return 0
+
+def get_current_experience(staff_id):
+    if conn.is_connected():
+        # Define the experience levels in order
+        experience_levels = ['Trainee', 'Beginner', 'Intermediate', 'Experienced', 'Very Experienced']
+
+        # Get current experience type from Staff table
+        query = "SELECT Type FROM Staff WHERE ID = %s"
+        cursor.execute(query, (staff_id,))
+        result = cursor.fetchone()
+
+        if result:
+            current_type = result[0]
+            if current_type in experience_levels:
+                return current_type
+            else:
+                print(f"Unrecognized experience type: {current_type}")
+                return current_type
+        else:
+            print(f"No staff found with ID {staff_id}")
+            return None
+
+
+# ---------------- CLEAN UP EXISTING DATA ----------------
+# Disable foreign‑key checks temporarily to avoid constraint errors
+cursor.execute("SET FOREIGN_KEY_CHECKS = 0")
+
+# Delete dependent rows first, then parent rows
+cursor.execute("DELETE FROM Staff")
+cursor.execute("DELETE FROM Security_Staff")
+cursor.execute("DELETE FROM Support_Staff")
+cursor.execute("DELETE FROM Technical_Staff")
+cursor.execute("DELETE FROM event_staff")
+
+# Re‑enable foreign‑key checks
+cursor.execute("SET FOREIGN_KEY_CHECKS = 1")
+
+fake = Faker()
+Faker.seed(0)
+random.seed(0)
+
+OUTPUT_FILENAME = "data_event_staff.sql"
+print(f"Writing bulk INSERT statements to {OUTPUT_FILENAME}...")
+
+try:
+    with open(OUTPUT_FILENAME, 'w', encoding='utf-8') as f:
+        # First we are going to insert all of the staff members
+        
+        # We have to include at least (0.05 * max_capacity) security staff members
+        # We have to include at least (0.02 * max_capacity) helper staff members
+
+        STAFF_TYPES = ['Trainee', 'Beginner', 'Intermediate', 'Experienced', 'Very Experienced']
+        security_staff = []
+        support_staff = []
+        technical_staff = []
+        staff_values_sql_parts = []
+        role_inserts = []  # Collect role-specific insert SQLs
+        staff_id = 1
+
+        # Get all events and corresponding stage capacities
+        cursor.execute("""
+            SELECT E.ID, E.Stage_ID, S.Capacity 
+            FROM Event E 
+            JOIN Stage S ON E.Stage_ID = S.ID
+        """)
+
+        events = cursor.fetchall()
+
+        if not events:
+            print("No events found in the database.")
+            conn.close()
+            exit()
+
+        # --- Generate and assign staff based on stage capacity ---
+        for event_id, stage_id, stage_capacity in events:
+            
+            num_security = math.ceil(stage_capacity * 0.05)
+            num_support = math.ceil(stage_capacity * 0.02)
+            num_tech = math.ceil(stage_capacity * 0.03)
+
+            for i in range(num_security): # Security
+                name = fake.name().replace("'", "''")
+                age = random.randint(20, 60)
+                type_ = random.choice(STAFF_TYPES)
+
+                staff_values_sql_parts.append(f"({staff_id}, '{name}', {age}, '{type_}')")
+                role_inserts.append(f"INSERT INTO Security_Staff (Staff_ID) VALUES ({staff_id});")
+                security_staff.append(staff_id)
+
+                staff_id += 1
+        
+            for i in range(num_support): # Helper
+                name = fake.name().replace("'", "''")
+                age = random.randint(20, 60)
+                type_ = random.choice(STAFF_TYPES)         
+
+                staff_values_sql_parts.append(f"({staff_id}, '{name}', {age}, '{type_}')")
+                role_inserts.append(f"INSERT INTO Support_Staff (Staff_ID) VALUES ({staff_id});")
+                support_staff.append(staff_id)
+
+                staff_id += 1
+
+            for i in range(num_tech): # Technician
+
+                name = fake.name().replace("'", "''")
+                age = random.randint(20, 60)
+                type_ = random.choice(STAFF_TYPES)
+
+                staff_values_sql_parts.append(f"({staff_id}, '{name}', {age}, '{type_}')")
+                role_inserts.append(f"INSERT INTO Technical_Staff (Staff_ID) VALUES ({staff_id});")
+                technical_staff.append(staff_id)
+
+                staff_id += 1
+
+        print(f"Generated {len(staff_values_sql_parts)} staff members in total.")
+
+    
+        # --- Insert Staff Data into DB and Write to File ---
+        if staff_values_sql_parts:
+            staff_sql = "INSERT INTO Staff (ID, Name, Age, Type) VALUES\n"
+            staff_sql += ",\n".join(staff_values_sql_parts)
+            staff_sql += ";"
+
+            # Write to file
+            f.write(staff_sql)
+            f.write("\n\n")
+
+            # Execute in DB
+            try:
+                cursor.execute(staff_sql)
+            except mysql.connector.Error as err:
+                print(f"Error inserting staff data into database: {err}")
+
+                # --- Insert Role Data (Security, Support, Technical) ---
+        if role_inserts:
+            # Write role insert SQLs to file
+            f.write("\n\n-- Inserting staff roles into respective tables\n")
+            f.write("\n".join(role_inserts))
+            f.write("\n\n")
+
+            # Execute role insert SQLs in DB
+            for insert_sql in role_inserts:
+                try:
+                    cursor.execute(insert_sql)
+                except mysql.connector.Error as err:
+                    print(f"Error inserting role data into database: {err}")
+
+
+        # Now we will populate the event_staff table assigning the staff to the events
+        f.write("\n\n-- Assigning each staff member to an event\n")
+        event_staff_sql_parts = []
+
+        NUM_FESTIVALS = 10
+        NUM_EVENTS = 20
+
+        for festival_id in range(1, NUM_FESTIVALS + 1):
+            staff_members_assigned = []
+            for event_id in range(1, NUM_EVENTS + 1):
+                query = "SELECT Stage_ID FROM Event WHERE ID = %s"
+                cursor.execute(query, (event_id,))
+                stage_id = cursor.fetchone()
+                if not stage_id:
+                    print(f"No stage found for event {event_id}")
+                    continue
+
+                stage_id = stage_id[0]  # Extract Stage_ID from tuple
+                stage_capacity = get_stage_capacity(stage_id)
+
+                try:
+                    # SECURITY STAFF
+                    available_security = [s for s in security_staff if s not in staff_members_assigned]
+                    for s in random.sample(available_security, min(len(available_security), math.ceil(stage_capacity * 0.05))):
+                        event_staff_sql_parts.append(f"({s}, {event_id})")
+                        staff_members_assigned.append(s)
+                    
+                    # SUPPORT STAFF
+                    available_support = [s for s in support_staff if s not in staff_members_assigned]
+                    for s in random.sample(available_support, min(len(available_support), math.ceil(stage_capacity * 0.02))):
+                        event_staff_sql_parts.append(f"({s}, {event_id})")
+                        staff_members_assigned.append(s)
+
+                    # TECHNICAL STAFF
+                    available_technical = [s for s in technical_staff if s not in staff_members_assigned]
+                    for s in random.sample(available_technical, min(len(available_technical), math.ceil(stage_capacity * 0.03))):
+                        event_staff_sql_parts.append(f"({s}, {event_id})")
+                        staff_members_assigned.append(s)
+
+                except Exception as e:
+                    print(f"festival: {festival_id} - venue: {event_id}")
+                    print(f"An unexpected error occurred: {e}")
+
+            print(f"Generated {len(event_staff_sql_parts)} staff_venue rows for festival {festival_id}.")
+
+
+            # --- Insert staff_venue Data into DB and Write to File ---
+            if event_staff_sql_parts:
+                staff_sql = "INSERT INTO event_staff (Staff_ID, Event_ID) VALUES\n"
+                staff_sql += ",\n".join(event_staff_sql_parts)
+                staff_sql += ";"
+
+                # Write to file
+                f.write(staff_sql)
+                f.write("\n\n")
+
+                # Execute in DB
+                try:
+                    cursor.execute(staff_sql)
+                except mysql.connector.Error as err:
+                    print(f"Error inserting staff data into database: {err}")
+
+                event_staff_sql_parts.clear()
+
+except IOError as e:
+    print(f"Error writing to file {OUTPUT_FILENAME}: {e}")
+except Exception as e:
+    print(f"An unexpected error occurred: {e}")
+
+# Ensure cursor and connection are closed
+if cursor:
+    cursor.close()
+    print("Database cursor closed.")
+if conn and conn.is_connected():
+    conn.close()
+    print("Database connection closed.")
+
+
