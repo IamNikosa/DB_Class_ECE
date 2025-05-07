@@ -1,0 +1,69 @@
+import random
+import mysql.connector
+from faker import Faker
+from geopy import distance
+
+# ---------------- CONFIG ----------------
+db_config = {
+    'host': 'localhost',
+    'user': 'root',
+    'password': '',
+    'database': 'Fest'
+}
+
+# Connect to the database
+conn = mysql.connector.connect(**db_config)
+cursor = conn.cursor()
+
+# Initialize Faker to generate fake data
+fake = Faker()
+Faker.seed(42)
+
+# Function to generate random latitude and longitude
+def generate_lat_lon():
+    # Generate random latitude and longitude in realistic ranges
+    lat = round(random.uniform(-90.0, 90.0), 6)  # Latitude between -90 and 90
+    lon = round(random.uniform(-180.0, 180.0), 6)  # Longitude between -180 and 180
+    return lat, lon
+
+# Number of locations to generate
+NUM_LOCATIONS = 20  # Change this to the number of locations you want to create
+
+locations = []
+
+# Generate random locations
+for _ in range(NUM_LOCATIONS):
+    name = fake.company()  # Name of the location, like a venue or festival name
+    city = fake.city().replace("'", "''")  # City where the location is
+    country = fake.country().replace("'", "''")  # Country
+    continent = fake.random.choice(['Asia', 'Europe', 'North America', 'South America', 'Africa', 'Australia/Oceania'])  # Continent
+    
+    address = fake.address().replace("\n", ", ").replace("'", "''")  # Full address
+
+    # Generate random latitude and longitude
+    latitude, longitude = generate_lat_lon()
+
+    # Prepare the location data as a tuple
+    locations.append((name, latitude, longitude, address, city, country, continent))
+
+# Prepare the SQL insert query
+insert_query = """
+INSERT INTO Location (ID, Name, Latitude, Longitude, Address, City, Country, Continent)
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+"""
+
+# Insert the generated locations into the Location table
+try:
+    # Generate unique IDs for each location (assuming auto-increment is not enabled)
+    id_counter = 1
+    locations_with_ids = [(id_counter + i, *location) for i, location in enumerate(locations)]
+    
+    cursor.executemany(insert_query, locations_with_ids)
+    conn.commit()
+    print(f"Inserted {cursor.rowcount} fake locations into the Location table.")
+except mysql.connector.Error as err:
+    print(f"Error inserting locations: {err}")
+finally:
+    cursor.close()
+    conn.close()
+    print("Database connection closed.")
