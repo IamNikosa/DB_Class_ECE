@@ -20,15 +20,6 @@ CREATE TABLE Location (
     UNIQUE (Address, City, Country, Continent)
 );
 
--- Create Stage table (renamed the second Stage table to Performer_Stage)
-CREATE TABLE Stage (
-    ID INT PRIMARY KEY,
-    Name VARCHAR(100) NOT NULL,
-    Description VARCHAR(255),
-    Capacity INT NOT NULL,
-    Tech_Info VARCHAR(255) NOT NULL
-);
-
 CREATE TABLE Visitor (
     ID INT PRIMARY KEY,
     First_Name VARCHAR(100),
@@ -48,6 +39,17 @@ CREATE TABLE Festival (
     Year INT GENERATED ALWAYS AS (YEAR(Start_Date)) STORED, -- Generated column for the year
     UNIQUE (Year),  -- Unique constraint on the generated year column
     FOREIGN KEY (Location_ID) REFERENCES Location(ID) ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+-- Create Stage table (renamed the second Stage table to Performer_Stage)
+CREATE TABLE Stage (
+    ID INT PRIMARY KEY,
+    Name VARCHAR(100) NOT NULL,
+    Description VARCHAR(255),
+    Festival_ID INT,
+    Capacity INT NOT NULL,
+    Tech_Info VARCHAR(255) NOT NULL,
+    FOREIGN KEY (Festival_ID) REFERENCES Festival(ID) ON DELETE CASCADE ON UPDATE CASCADE
 );
 
 -- Create Event table (Removed PERIOD FOR syntax)
