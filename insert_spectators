@@ -1,0 +1,72 @@
+import random
+import mysql.connector
+
+# ---------- CONFIG ----------
+db_config = {
+    'host': 'localhost',
+    'user': 'root',
+    'password': '',
+    'database': 'festival'
+}
+
+# ---------- CONNECT ----------
+conn = mysql.connector.connect(**db_config)
+cursor = conn.cursor()
+
+# ---------------- CLEAN UP EXISTING DATA ----------------
+# Disable foreign‑key checks temporarily to avoid constraint errors
+cursor.execute("SET FOREIGN_KEY_CHECKS = 0")
+
+# Delete dependent rows first, then parent rows
+cursor.execute("DELETE FROM Spectator")
+
+# Re‑enable foreign‑key checks
+cursor.execute("SET FOREIGN_KEY_CHECKS = 1")
+
+# ---------- FETCH VISITORS & TICKETS ----------
+# ---------- FETCH DATA ----------
+# Get all visitor IDs
+cursor.execute("SELECT ID FROM Visitor")
+visitor_ids = [row[0] for row in cursor.fetchall()]
+
+# Get all tickets and their associated event IDs
+cursor.execute("SELECT ID, Event_ID FROM Ticket")
+ticket_data = cursor.fetchall()
+ticket_event_map = {ticket_id: event_id for ticket_id, event_id in ticket_data}
+ticket_ids = list(ticket_event_map.keys())
+
+# ---------- CONFIGURE NUMBER OF SPECTATORS ----------
+NUM_SPECTATORS = len(ticket_ids)  # Limit by available tickets
+
+# ---------- GENERATE SPECTATOR PAIRS ----------
+spectator_pairs = []
+used_ticket_ids = set()
+used_visitor_event_pairs = set()
+
+attempts = 0
+max_attempts = NUM_SPECTATORS * 10  # Prevent infinite loops
+
+while len(spectator_pairs) < NUM_SPECTATORS and attempts < max_attempts:
+    attempts += 1
+    visitor_id = random.choice(visitor_ids)
+    ticket_id = random.choice(ticket_ids)
+    event_id = ticket_event_map[ticket_id]
+
+    if ticket_id not in used_ticket_ids and (visitor_id, event_id) not in used_visitor_event_pairs:
+        spectator_pairs.append((visitor_id, ticket_id))
+        used_ticket_ids.add(ticket_id)
+        used_visitor_event_pairs.add((visitor_id, event_id))
+
+# ---------- INSERT INTO SPECTATOR ----------
+insert_query = "INSERT INTO Spectator (Visitor_ID, Ticket_ID) VALUES (%s, %s)"
+
+try:
+    cursor.executemany(insert_query, spectator_pairs)
+    conn.commit()
+    print(f"Inserted {cursor.rowcount} spectators into the Spectator table.")
+except mysql.connector.Error as err:
+    print(f"Error inserting spectators: {err}")
+finally:
+    cursor.close()
+    conn.close()
+    print("Database connection closed.")
