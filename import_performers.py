@@ -98,11 +98,11 @@ try:
         print(f"{cursor.rowcount} membership rows inserted.")
 
 except mysql.connector.Error as err:
-    print(f"❌ Database error: {err}")
+    print(f"Database error: {err}")
     if conn:
         conn.rollback()
 except Exception as e:
-    print(f"❌ Error: {e}")
+    print(f"Error: {e}")
     if conn:
         conn.rollback()
 finally:
