@@ -1,0 +1,52 @@
+import mysql.connector
+import random
+
+# ---------------- CONFIG ----------------
+db_config = {
+    'host': 'localhost',
+    'user': 'root',
+    'password': '',
+    'database': 'festival'
+}
+
+# ---------------- CONNECT ----------------
+conn = mysql.connector.connect(**db_config)
+cursor = conn.cursor()
+
+# ---------------- FETCH EXISTING IDs ----------------
+cursor.execute("SELECT ID FROM Performer")
+performer_ids = [row[0] for row in cursor.fetchall()]
+
+cursor.execute("SELECT ID FROM Subgenre")
+subgenre_ids = [row[0] for row in cursor.fetchall()]
+
+if not performer_ids or not subgenre_ids:
+    print("Missing performers or subgenres in the database.")
+    cursor.close()
+    conn.close()
+    exit()
+
+# ---------------- GENERATE MAPPINGS ----------------
+performer_subgenre_links = set()
+
+for performer_id in performer_ids:
+    count = random.randint(1, 3)  # Each performer gets 1–3 subgenres
+    assigned = random.sample(subgenre_ids, count)
+    for subgenre_id in assigned:
+        performer_subgenre_links.add((performer_id, subgenre_id))
+
+# ---------------- INSERT LINKS ----------------
+try:
+    insert_query = """
+        INSERT IGNORE INTO Performer_Subgenre (Performer_ID, Subgenre_ID)
+        VALUES (%s, %s)
+    """
+    cursor.executemany(insert_query, list(performer_subgenre_links))
+    conn.commit()
+    print(f"Inserted {cursor.rowcount} performer-subgenre links.")
+except mysql.connector.Error as err:
+    print(f"Error inserting links: {err}")
+finally:
+    cursor.close()
+    conn.close()
+    print("Database connection closed.")
