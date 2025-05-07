@@ -1,0 +1,72 @@
+import mysql.connector
+from faker import Faker
+import random
+
+# ---------------- CONFIG ----------------
+db_config = {
+    'host': 'localhost',
+    'user': 'root',
+    'password': '',
+    'database': 'festival'
+}
+
+# ---------------- INIT ----------------
+conn = mysql.connector.connect(**db_config)
+cursor = conn.cursor()
+fake = Faker()
+Faker.seed()
+
+# ---------------- HELPERS ----------------
+def fetch_ids(table, column='ID'):
+    cursor.execute(f"SELECT {column} FROM {table}")
+    return [row[0] for row in cursor.fetchall()]
+
+# Tables and their image link info
+image_links = {
+    'Festival': 'Festival_Image',
+    'Performer': 'Performer_Image',
+    'Stage': 'Stage_Image',
+    'Staff': 'Staff_Image',
+    'Event': 'Event_Image',
+    'Location': 'Location_Image'
+}
+
+# ---------------- GENERATE IMAGES ----------------
+TOTAL_IMAGES = 100  # Adjust this number if needed
+images = [(fake.image_url(), fake.sentence(nb_words=6)) for _ in range(TOTAL_IMAGES)]
+
+cursor.executemany("INSERT INTO Image (URL, Description) VALUES (%s, %s)", images)
+conn.commit()
+print(f"Inserted {cursor.rowcount} images.")
+
+# Get the image IDs just inserted
+cursor.execute("SELECT ID FROM Image ORDER BY ID DESC LIMIT %s", (TOTAL_IMAGES,))
+image_ids = [row[0] for row in cursor.fetchall()][::-1]  # Reverse to original insert order
+
+# ---------------- LINK IMAGES TO ENTITIES ----------------
+image_index = 0
+for table, link_table in image_links.items():
+    entity_ids = fetch_ids(table)
+    if not entity_ids:
+        print(f"Skipping {table} (no records).")
+        continue
+
+    links = []
+    for entity_id in entity_ids:
+        num_images = random.randint(1, 3)  # 1–3 images per entity
+        assigned_images = random.sample(image_ids, min(num_images, len(image_ids)))
+
+        for img_id in assigned_images:
+            links.append((entity_id, img_id))
+
+    # Build dynamic insert query
+    entity_col = f"{table}_ID"
+    insert_query = f"INSERT IGNORE INTO {link_table} ({entity_col}, Image_ID) VALUES (%s, %s)"
+    cursor.executemany(insert_query, links)
+    conn.commit()
+    print(f"Linked {cursor.rowcount} images to {table}.")
+
+# ---------------- DONE ----------------
+cursor.close()
+conn.close()
+print("All images inserted and linked successfully.")
