@@ -1,0 +1,50 @@
+import mysql.connector
+from faker import Faker
+import random
+
+# Database configuration
+db_config = {
+    'host': 'localhost',
+    'user': 'root',
+    'password': '',
+    'database': 'Fest'
+}
+
+# Connect to the database
+conn = mysql.connector.connect(**db_config)
+cursor = conn.cursor()
+
+# Initialize Faker
+fake = Faker()
+Faker.seed(42)
+random.seed(42)
+
+# Number of stages to generate
+NUM_STAGES = 20
+
+# Generate and insert stages
+stage_data = []
+for stage_id in range(1, NUM_STAGES + 1):
+    name = fake.company() + " Stage"
+    description = fake.sentence(nb_words=6)
+    capacity = random.randint(200, 5000)
+    tech_info = fake.catch_phrase()
+
+    stage_data.append((stage_id, name, description, capacity, tech_info))
+
+# Insert into Stage table
+insert_query = """
+INSERT INTO Stage (ID, Name, Description, Capacity, Tech_Info)
+VALUES (%s, %s, %s, %s, %s)
+"""
+
+try:
+    cursor.executemany(insert_query, stage_data)
+    conn.commit()
+    print(f"{cursor.rowcount} fake stages inserted successfully.")
+except mysql.connector.Error as err:
+    print(f"Database error: {err}")
+finally:
+    cursor.close()
+    conn.close()
+    print("Database connection closed.")
