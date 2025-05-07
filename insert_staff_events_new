@@ -9,7 +9,7 @@ db_config = {
     'host': 'localhost',
     'user': 'root',
     'password': '',
-    'database': 'Fest'
+    'database': 'festival'
 }
 
 # Connect to the database
@@ -183,66 +183,56 @@ try:
         # Now we will populate the event_staff table assigning the staff to the events
         f.write("\n\n-- Assigning each staff member to an event\n")
         event_staff_sql_parts = []
+        inserted_pairs = set()
 
-        NUM_FESTIVALS = 10
-        NUM_EVENTS = 20
+        cursor.execute("SELECT ID, Stage_ID FROM Event")
+        all_events = cursor.fetchall()
 
-        for festival_id in range(1, NUM_FESTIVALS + 1):
-            staff_members_assigned = []
-            for event_id in range(1, NUM_EVENTS + 1):
-                query = "SELECT Stage_ID FROM Event WHERE ID = %s"
-                cursor.execute(query, (event_id,))
-                stage_id = cursor.fetchone()
-                if not stage_id:
-                    print(f"No stage found for event {event_id}")
-                    continue
+        for event in all_events:
+            event_id, stage_id = event
+            stage_capacity = get_stage_capacity(stage_id)
+            staff_members_assigned = set()
 
-                stage_id = stage_id[0]  # Extract Stage_ID from tuple
-                stage_capacity = get_stage_capacity(stage_id)
+            # SECURITY STAFF
+            available_security = [s for s in security_staff if s not in staff_members_assigned]
+            for s in random.sample(available_security, min(len(available_security), math.ceil(stage_capacity * 0.05))):
+                if (s, event_id) not in inserted_pairs:
+                    event_staff_sql_parts.append((s, event_id))
+                    inserted_pairs.add((s, event_id))
+                    staff_members_assigned.add(s)
 
-                try:
-                    # SECURITY STAFF
-                    available_security = [s for s in security_staff if s not in staff_members_assigned]
-                    for s in random.sample(available_security, min(len(available_security), math.ceil(stage_capacity * 0.05))):
-                        event_staff_sql_parts.append(f"({s}, {event_id})")
-                        staff_members_assigned.append(s)
-                    
-                    # SUPPORT STAFF
-                    available_support = [s for s in support_staff if s not in staff_members_assigned]
-                    for s in random.sample(available_support, min(len(available_support), math.ceil(stage_capacity * 0.02))):
-                        event_staff_sql_parts.append(f"({s}, {event_id})")
-                        staff_members_assigned.append(s)
+            # SUPPORT STAFF
+            available_support = [s for s in support_staff if s not in staff_members_assigned]
+            for s in random.sample(available_support, min(len(available_support), math.ceil(stage_capacity * 0.02))):
+                if (s, event_id) not in inserted_pairs:
+                    event_staff_sql_parts.append((s, event_id))
+                    inserted_pairs.add((s, event_id))
+                    staff_members_assigned.add(s)
 
-                    # TECHNICAL STAFF
-                    available_technical = [s for s in technical_staff if s not in staff_members_assigned]
-                    for s in random.sample(available_technical, min(len(available_technical), math.ceil(stage_capacity * 0.03))):
-                        event_staff_sql_parts.append(f"({s}, {event_id})")
-                        staff_members_assigned.append(s)
+            # TECHNICAL STAFF
+            available_technical = [s for s in technical_staff if s not in staff_members_assigned]
+            for s in random.sample(available_technical, min(len(available_technical), math.ceil(stage_capacity * 0.03))):
+                if (s, event_id) not in inserted_pairs:
+                    event_staff_sql_parts.append((s, event_id))
+                    inserted_pairs.add((s, event_id))
+                    staff_members_assigned.add(s)
 
-                except Exception as e:
-                    print(f"festival: {festival_id} - venue: {event_id}")
-                    print(f"An unexpected error occurred: {e}")
+        print(f"Total staff-event assignments: {len(event_staff_sql_parts)}")
 
-            print(f"Generated {len(event_staff_sql_parts)} staff_venue rows for festival {festival_id}.")
+        if event_staff_sql_parts:
+            # Write to file
+            f.write("INSERT INTO event_staff (Staff_ID, Event_ID) VALUES\n")
+            f.write(",\n".join(f"({sid}, {eid})" for sid, eid in event_staff_sql_parts))
+            f.write(";\n")
 
-
-            # --- Insert staff_venue Data into DB and Write to File ---
-            if event_staff_sql_parts:
-                staff_sql = "INSERT INTO event_staff (Staff_ID, Event_ID) VALUES\n"
-                staff_sql += ",\n".join(event_staff_sql_parts)
-                staff_sql += ";"
-
-                # Write to file
-                f.write(staff_sql)
-                f.write("\n\n")
-
-                # Execute in DB
-                try:
-                    cursor.execute(staff_sql)
-                except mysql.connector.Error as err:
-                    print(f"Error inserting staff data into database: {err}")
-
-                event_staff_sql_parts.clear()
+            # Execute insert in batches
+            insert_query = "INSERT INTO event_staff (Staff_ID, Event_ID) VALUES (%s, %s)"
+            try:
+                cursor.executemany(insert_query, event_staff_sql_parts)
+            except mysql.connector.Error as err:
+                print(f"Error inserting staff-event assignments into database: {err}")
+            
+            event_staff_sql_parts.clear()
 
 except IOError as e:
     print(f"Error writing to file {OUTPUT_FILENAME}: {e}")
@@ -256,6 +246,7 @@ if cursor:
 if conn and conn.is_connected():
     conn.close()
     print("Database connection closed.")
+
 
 
 
