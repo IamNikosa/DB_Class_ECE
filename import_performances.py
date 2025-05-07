@@ -13,12 +13,6 @@ conn = mysql.connector.connect(
 )
 cursor = conn.cursor()
 
-# ——— Wipe out old performances (bypass delete‐trigger) ———
-cursor.execute("SET FOREIGN_KEY_CHECKS = 0;")
-cursor.execute("TRUNCATE TABLE Performance;")
-cursor.execute("SET FOREIGN_KEY_CHECKS = 1;")
-conn.commit()
-
 random.seed(42)
 
 # ——— Load events and performers ———
@@ -38,9 +32,6 @@ INSERT INTO Performance
 VALUES (%s, %s, %s, %s, %s, %s)
 """
 TYPES = ['Warm up', 'Head line', 'Special guest']
-
-# Track each performer's booked intervals (as datetimes)
-performer_calendar = {}  # performer_id -> list of (start_dt, end_dt)
 
 perf_id = 1
 inserted = skipped = 0
