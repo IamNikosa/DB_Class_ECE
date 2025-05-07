@@ -20,7 +20,7 @@ fake = Faker()
 Faker.seed(123)
 random.seed(123)
 
-NUM_EVENTS = 100
+NUM_EVENTS = 50
 
 # Fetch Stage and Festival data
 def fetch_stage_ids():
