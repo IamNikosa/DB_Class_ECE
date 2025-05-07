@@ -4,7 +4,7 @@ import random
 from datetime import datetime, timedelta
 
 # Constants
-NUM_PERFORMERS = 200
+NUM_PERFORMERS = 100
 
 try:
     # Database configuration
