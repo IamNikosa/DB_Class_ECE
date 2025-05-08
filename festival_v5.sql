@@ -28,8 +28,6 @@ CREATE TABLE Stage (
     Description VARCHAR(255),
     Capacity INT NOT NULL,
     Tech_Info VARCHAR(255) NOT NULL
-    Festival_ID INT,
-    FOREIGN KEY (Festival_ID) REFERENCES Festival(ID) ON UPDATE CASCADE
 );
 
 CREATE TABLE Visitor (
