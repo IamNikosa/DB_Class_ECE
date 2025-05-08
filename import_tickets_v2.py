@@ -50,7 +50,7 @@ def fetch_events_with_capacity():
 # Student cheapest, then Regular, then Backstage, then VIP
 default_prices = {
     'Student': 20.00,
-    'Regular': 50.00,
+    'Standard': 50.00,
     'Backstage': 80.00,
     'VIP': 120.00,
 }
