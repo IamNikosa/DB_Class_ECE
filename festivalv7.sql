@@ -1003,6 +1003,10 @@ BEGIN
 
         INSERT INTO Spectator (Visitor_ID, Ticket_ID)
         VALUES (p_Visitor_ID, v_New_Ticket_ID);
+
+        INSERT INTO Transaction (Is_Resale, Ticket_ID, Buyer_ID)
+        VALUES (FALSE, v_New_Ticket_ID, p_Visitor_ID)
+        
     END IF;
 END$$
 
