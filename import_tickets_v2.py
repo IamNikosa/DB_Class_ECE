@@ -9,7 +9,7 @@ from datetime import datetime
 db_config = {
     'host': 'localhost',
     'user': 'root',
-    'password': 'xaua6709ni!',
+    'password': '',
     'database': 'Festival'
 }
 
