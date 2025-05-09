@@ -8,7 +8,7 @@ conn = mysql.connector.connect(
 )
 cursor = conn.cursor()
 
-artist_name = 'Tammy Romero'  # <-- Βάλε εδώ το όνομα που σε ενδιαφέρει
+artist_name = 'Valerie Sweeney'  # <-- Βάλε εδώ το όνομα που σε ενδιαφέρει
 
 query = f"""
 SELECT 
