@@ -1,5 +1,3 @@
-
-
 import mysql.connector
 
 # --- Connect to the database ---
