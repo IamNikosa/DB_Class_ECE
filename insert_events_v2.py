@@ -1,0 +1,84 @@
+import mysql.connector
+from faker import Faker
+import random
+from datetime import datetime, timedelta
+
+# Database configuration
+db_config = {
+    'host': 'localhost',
+    'user': 'root',
+    'password': '',
+    'database': 'festival'
+}
+
+# Connect to database
+conn = mysql.connector.connect(**db_config)
+cursor = conn.cursor()
+
+# Initialize Faker
+fake = Faker()
+import time
+Faker.seed(int(time.time()))
+random.seed(int(time.time()))
+
+
+NUM_EVENTS = 80
+
+# Fetch Stage and Festival data
+def fetch_stage_ids():
+    cursor.execute("SELECT ID FROM Stage")
+    return [row[0] for row in cursor.fetchall()]
+
+def fetch_festival_data():
+    cursor.execute("SELECT ID, Start_Date FROM Festival")
+    return [(fid, datetime.combine(sdate, datetime.min.time())) for fid, sdate in cursor.fetchall()]
+
+stage_ids = fetch_stage_ids()
+festival_data = fetch_festival_data()
+
+if not stage_ids or not festival_data:
+    print("Ensure both Stage and Festival tables have data.")
+    conn.close()
+    exit()
+
+# Generate fake events
+event_data = []
+used_combinations = set()
+
+for event_id in range(1, NUM_EVENTS + 1):
+    attempt = 0
+    while attempt < 10:  # prevent infinite loop
+        festival_id, fest_start = random.choice(festival_data)
+        stage_id = random.choice(stage_ids)
+
+        # Ensure event is within 7 days of festival start
+        start_time = fake.date_time_between(
+            start_date=fest_start,
+            end_date=fest_start + timedelta(days=6)
+        )
+        end_time = start_time + timedelta(hours=random.randint(1, 4))
+
+        combo_key = (festival_id, stage_id, start_time)
+        if combo_key not in used_combinations:
+            used_combinations.add(combo_key)
+            sold_out = False
+            event_data.append((event_id, start_time, end_time, sold_out, festival_id, stage_id))
+            break
+        attempt += 1
+
+# Insert into database
+insert_query = """
+INSERT INTO Event (ID, Start_Time, End_Time, Sold_Out, Festival_ID, Stage_ID)
+VALUES (%s, %s, %s, %s, %s, %s)
+"""
+
+try:
+    cursor.executemany(insert_query, event_data)
+    conn.commit()
+    print(f"{cursor.rowcount} fake events inserted successfully.")
+except mysql.connector.Error as err:
+    print(f"Database error: {err}")
+finally:
+    cursor.close()
+    conn.close()
+    print("Database connection closed.")
