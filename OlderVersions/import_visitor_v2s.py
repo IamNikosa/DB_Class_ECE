@@ -20,7 +20,7 @@ Faker.seed(42)
 random.seed(42)
 
 # Number of visitors to create
-NUM_VISITORS = 200
+NUM_VISITORS = 2000
 
 visitor_data = []
 
