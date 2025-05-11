@@ -25,7 +25,7 @@ DB_CONFIG = {
     'database': 'Festival'
 }
 SQL_FILENAME = 'generated_visitors.sql'
-NUM_VISITORS = 200
+NUM_VISITORS = 2000
 
 # ---------------- CONNECT ----------------
 conn = mysql.connector.connect(**DB_CONFIG)
