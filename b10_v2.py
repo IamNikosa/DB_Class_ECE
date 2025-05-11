@@ -38,7 +38,7 @@ cursor.execute(query)
 rows = cursor.fetchall()
 
 if rows:
-    print("Top-3 ζεύγη μουσικών υποειδών που εμφανίστηκαν σε φεστιβάλ:\n")
+    print("Top-3 ζεύγη μουσικών ειδών που εμφανίστηκαν σε φεστιβάλ:\n")
     print("Είδος 1 | Είδος 2 | Φεστιβάλ")
     print("-" * 40)
     for row in rows:
