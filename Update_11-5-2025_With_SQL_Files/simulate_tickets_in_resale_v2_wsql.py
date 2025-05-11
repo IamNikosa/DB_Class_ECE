@@ -83,16 +83,16 @@ def simulate_resale(num_simulations):
                     (ticket_id,)
                 )
                 conn.commit()
-                print(f"[{i+1}] Ticket {ticket_id} → Event {event_id}: Resold immediately.")
+                print(f"[{i+1}] Ticket {ticket_id} -> Event {event_id}: Resold immediately.")
                 success += 1
             else:
-                print(f"[{i+1}] Ticket {ticket_id} → Event {event_id}: Added to resale queue.")
+                print(f"[{i+1}] Ticket {ticket_id} -> Event {event_id}: Added to resale queue.")
                 queue += 1
 
             inserts.append((ticket_id, event_id))
 
         except mysql.connector.Error as err:
-            print(f"[{i+1}] Ticket {ticket_id} → Event {event_id}: {err.msg}")
+            print(f"[{i+1}] Ticket {ticket_id} -> Event {event_id}: {err.msg}")
             conn.rollback()
             error += 1
 
