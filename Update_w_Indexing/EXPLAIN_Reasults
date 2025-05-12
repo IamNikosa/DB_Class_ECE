@@ -1,0 +1,159 @@
+QUERY 4 WITH NESTED LOOP JOIN WITHOUT OPTIMISATION
++----+-------------+-------+--------+----------------------------------------------------------+--------------------+---------+-------------------------+------+----------------------------------------------+
+| id | select_type | table | type   | possible_keys  | key   | key_len | ref     | rows | Extra |
++----+-------------+-------+--------+----------------------------------------------------------+--------------------+---------+-------------------------+------+----------------------------------------------+
+|  1 | SIMPLE      | e     | index  | PRIMARY | idx_festival_event | 4       | NULL                    | 80   | Using index; Using temporary; Using filesort |
+|  1 | SIMPLE      | p     | ref    | Event_ID,idx_performance_performer,idx_performance_event | Event_ID           | 4       | festival.e.ID           | 1    | Using index   |
+|  1 | SIMPLE      | pe    | eq_ref | PRIMARY | PRIMARY  | 4       | festival.p.Performer_ID | 1    | Using where         |
+|  1 | SIMPLE | t  | ref | PRIMARY,idx_ticket_event  | idx_ticket_event   | 5  | festival.e.ID  | 74   | Using index             |
+|  1 | SIMPLE      | r     | eq_ref | Ticket_ID,idx_review_ticket | Ticket_ID | 5| festival.t.ID   | 1    |     |
++----+-------------+-------+--------+----------------------------------------------------------+--------------------+---------+-------------------------+------+----------------------------------------------+
+
+🔍 Interpretation of This Query Plan
+Table	Access Type	Key Used	Rows	Extra
+e (Event)	index	idx_festival_event	80	❗️Using temporary; Using filesort
+p (Performance)	ref	Event_ID	1	Using index
+pe (Performer)	eq_ref	PRIMARY	1	Using where
+t (Ticket)	ref	idx_ticket_event	74	Using index
+r (Review)	eq_ref	Ticket_ID	1	—
+
+⚠️ Why This Plan Is Worse
+1.	e table as the starting point (accessed via idx_festival_event):
+o	It leads to more rows being evaluated early, resulting in higher memory usage.
+2.	Using temporary; Using filesort:
+o	This is costly and often indicates GROUP BY without effective indexing.
+o	The sorting and temporary table creation slow down performance, especially with large datasets.
+3.	Order of joins is suboptimal:
+o	Starting from pe using a WHERE clause filter on Stage_Name (as in your earlier plan) was much more selective, thus better for filtering early and joining less.
+
+QUERY 4 WITH NESTED LOOP JOIN AND FORCE INDEX
++----+-------------+-------+--------+---------------------------+---------------------------+---------+---------------------+------+-------------+
+| id | select_type | table | type   | possible_keys             | key                       | key_len | ref                 | rows | Extra       |
++----+-------------+-------+--------+---------------------------+---------------------------+---------+---------------------+------+-------------+
+| id | select_type | table | type   | possible_keys             | key                       | key_len | ref                 | rows | Extra       |
++----+-------------+-------+--------+---------------------------+---------------------------+---------+---------------------+------+-------------+
+|  1 | SIMPLE      | pe    | index  | PRIMARY                   | PRIMARY                   | 4       | NULL                | 80   | Using where |
+|  1 | SIMPLE      | p| ref| idx_performance_performer | idx_performance_performer | 4 | festival.pe.ID | 1    |             |
+|  1 | SIMPLE      | e     | eq_ref | PRIMARY                   | PRIMARY                   | 4       | festival.p.Event_ID | 1    | Using index |
+|  1 | SIMPLE      | t     | ref    | idx_ticket_event | idx_ticket_event | 5       | festival.p.Event_ID | 74   | Using index |
+|  1 | SIMPLE      | r     | ref    | idx_review_ticket         | idx_review_ticket         | 5       | festival.t.ID       | 1    |             |
+
+Analysis of Your EXPLAIN Plan
+Table	Access Type	Index Used	Rows	Comment
+pe (Performer)	index	PRIMARY	80	Full index scan (but limited by WHERE)
+p (Performance)	ref	idx_performance_performer	1	Fast lookup via index on performer
+e (Event)	eq_ref	PRIMARY	1	One-to-one lookup on event ID
+t (Ticket)	ref	idx_ticket_event	74	Indexed join on event_id
+r (Review)	ref	idx_review_ticket	1	Indexed join on ticket_id
+✅ What Went Well (Good Design)
+1.	Index Usage
+o	All joins use indexes (ref or eq_ref), showing that MySQL is applying Nested Loop Join with index access.
+o	idx_performance_performer, idx_ticket_event, and idx_review_ticket are used exactly as intended.
+2.	Low Row Estimates
+o	Except for tickets (74 rows), all other steps retrieve only 1 row per join, which is optimal.
+3.	Using index
+o	Appears in Event and Ticket tables: means MySQL uses a covering index, so it doesn't even need to fetch rows from the table (only from the index)
+
+ 
+
+
+QUERY 4 STRAIGHT JOIN
+Analysis of the STRAIGHT_JOIN Query Execution Plan
+Step	Table	Join Type	Access Type	Index Used	Rows Scanned	Notes
+1	pe	Base	index	PRIMARY	80	Full index scan with WHERE filter on Stage_Name
+2	p	Join	ref	idx_performance_performer	1	Efficient join via indexed foreign key
+3	e	Join	eq_ref	PRIMARY	1	Exact match using primary key
+4	t	Join	ref	idx_ticket_event	74	Many tickets per event
+5	r	Join	eq_ref	Ticket_ID	1	One review per ticket
+
+QUERY 6 STRAIGHT JOIN 
++----+-------------+-------+--------+-------------------------------------------------+-----------+---------+------------------------+------+----------------------------------------------+
+| id | select_type | table | type   | possible_keys                                   | key       | key_len | ref                    | rows | Extra                                        |
++----+-------------+-------+--------+-------------------------------------------------+-----------+---------+------------------------+------+----------------------------------------------+
+|  1 | SIMPLE      | sp    | ref    | PRIMARY,idx_spectator_ticket,idx_visitor_ticket | PRIMARY   | 4       | const | 9    | Using index; Using temporary; Using filesort |
+|  1 | SIMPLE      | t     | eq_ref | PRIMARY,idx_ticket_event   | PRIMARY   | 4       | festival.sp.Ticket_ID  | 1    | Using where                                  |
+|  1 | SIMPLE      | e     | eq_ref | PRIMARY,Festival_ID,idx_festival_event          | PRIMARY   | 4       | festival.t.Event_ID    | 1    |                                              |
+|  1 | SIMPLE      | f     | eq_ref | PRIMARY   | PRIMARY   | 4       | festival.e.Festival_ID | 1    |         |
+|  1 | SIMPLE      | r     | eq_ref | Ticket_ID,idx_review_ticket    | Ticket_ID | 5       | festival.sp.Ticket_ID  | 1    |           |
++----+-------------+-------+--------+-------------------------------------------------+-----------+---------+------------------------+------+----------------------------------------------+
+🔍 Key Observations:
+Table	Access Type	Key Used	Rows Examined	Notes
+sp	ref	PRIMARY	9	Good filter via Visitor_ID
+t	eq_ref	PRIMARY	1	Ticket by ID — optimal join
+e	eq_ref	PRIMARY	1	Event by ID — optimal join
+f	eq_ref	PRIMARY	1	Festival by ID — optimal join
+r	eq_ref	Ticket_ID	1	Review by Ticket — very precise
+
+QUERY 6 NESTED LOOP JOIN WITHOUT OPTIMIZATION
+
++----+-------------+-------+--------+-------------------------------------------------+-----------+---------+------------------------+------+-----------------------------------------------------------+
+| id | select_type | table | type   | possible_keys   | key  | key_len | ref  | rows | Extra |
++----+-------------+-------+--------+-------------------------------------------------+-----------+---------+------------------------+------+-----------------------------------------------------------+
+|  1 | SIMPLE      | sp    | ref    | PRIMARY,idx_spectator_ticket,idx_visitor_ticket | PRIMARY   | 4 | const   | 9    | Using where; Using index; Using temporary; Using filesort |
+|  1 | SIMPLE      | r     | eq_ref | Ticket_ID,idx_review_ticket   | Ticket_ID | 5       | festival.sp.Ticket_ID  | 1    |                                                           |
+|  1 | SIMPLE      | t     | eq_ref | PRIMARY,idx_ticket_event   | PRIMARY   | 4       | festival.sp.Ticket_ID  | 1    | Using where                                               |
+|  1 | SIMPLE | e  | eq_ref | PRIMARY,Festival_ID,idx_festival_event  | PRIMARY | 4  | Festival.t.Event_ID | 1    |                                                           |
+|  1 | SIMPLE      | f     | eq_ref | PRIMARY    | PRIMARY   | 4       | festival.e.Festival_ID | 1    |        |
++----+-------------+-------+--------+-------------------------------------------------+-----------+---------+------------------------+------+-----------------------------------------------------------+
+✅ What’s Working Well:
+•	Join Types (eq_ref): This is as efficient as it gets — one-to-one row lookups using indexed primary/unique keys.
+•	Index Use: All tables are using indexed lookups, avoiding full table scans.
+•	Efficient Join Order: The order makes sense starting with Spectator filtered by Visitor_ID.
+________________________________________
+⚠️ What Could Be Improved:
+•	The Extra column shows:
+Using where; Using index; Using temporary; Using filesort
+This suggests that while index filtering is working, sorting and grouping still create temporary tables and filesorting.
+
+
+QUERY 6 WITH STRAIGHT JOIN
++----+-------------+-------+--------+----------------------------------------------------------+---------------------------+---------+---------------------+------+-------------+
+| id | select_type | table | type   | possible_keys                                            | key                       | key_len | ref                 | rows | Extra       |
++----+-------------+-------+--------+----------------------------------------------------------+---------------------------+---------+---------------------+------+-------------+
+|  1 | SIMPLE      | pe    | index  | PRIMARY                                                  | PRIMARY                   | 4       | NULL                | 80   | Using where |
+|  1 | SIMPLE      | p     | ref    | Event_ID,idx_performance_performer,idx_performance_event | idx_performance_performer | 4       | festival.pe.ID      | 1    |             |
+|  1 | SIMPLE      | e     | eq_ref | PRIMARY                                                  | PRIMARY                   | 4       | festival.p.Event_ID | 1    | Using index |
+|  1 | SIMPLE      | t     | ref    | PRIMARY,idx_ticket_event                                 | idx_ticket_event          | 5       | festival.p.Event_ID | 74   | Using index |
+|  1 | SIMPLE      | r     | eq_ref | Ticket_ID,idx_review_ticket                              | Ticket_ID                 | 5       | festival.t.ID       | 1    |             |
++----+-------------+-------+--------+----------------------------------------------------------+---------------------------+---------+---------------------+------+-------------+
+🔍 Execution Plan Breakdown:
+Table	Type	Key Used	Access Type	Notes
+pe	index	PRIMARY	Full index scan	Starting point — matches your WHERE pe.Stage_Name = ... clause
+p	ref	idx_performance_performer	Efficient — uses performer ID from pe	
+e	eq_ref	PRIMARY	Very efficient — one-to-one event lookup	
+t	ref	idx_ticket_event	Looks up all tickets for the event	
+r	eq_ref	Ticket_ID	Single review per ticket	
+
+What's Good:
+•	All joins are nested-loop joins, which are ideal when you're using eq_ref and ref with good indexes.
+•	STRAIGHT_JOIN forces this exact join order, avoiding the optimizer’s reordering.
+•	Indexes are working — no full table scans.
+________________________________________
+⚠️ Potential Considerations:
+•	pe is the driving table (started first), which is fine because Stage_Name = ? filters it effectively. However, if you're not filtering strongly by Stage_Name, it could be inefficient.
+•	You're still scanning ~74 tickets per event (t table) — that’s acceptable but could add up.
+________________________________________
+🧠 When STRAIGHT_JOIN Helps:
+Using STRAIGHT_JOIN is helpful when:
+•	You know a specific join order is more efficient than what the optimizer would choose.
+•	You're starting with the most selective filter, which you're doing here with pe.Stage_Name.
+
+QUERY 6 WITH NESTED LOOP JOIN AND FORCED INDEX
++----+-------------+-------+--------+--------------------+--------------------+---------+------------------------+------+-----------------------------------------------------------+
+| id | select_type | table | type   | possible_keys      | key                | key_len | ref                    | rows | Extra                                                     |
++----+-------------+-------+--------+--------------------+--------------------+---------+------------------------+------+-----------------------------------------------------------+
+|  1 | SIMPLE      | sp    | ref    | idx_visitor_ticket | idx_visitor_ticket | 4       | const                  | 9    | Using where; Using index; Using temporary; Using filesort |
+|  1 | SIMPLE      | r     | ref    | idx_review_ticket  | idx_review_ticket  | 5       | festival.sp.Ticket_ID  | 1    |                                                           |
+|  1 | SIMPLE      | t     | eq_ref | PRIMARY            | PRIMARY            | 4       | festival.sp.Ticket_ID  | 1    | Using where                                               |
+|  1 | SIMPLE      | e     | eq_ref | PRIMARY            | PRIMARY            | 4       | festival.t.Event_ID    | 1    |                                                           |
+|  1 | SIMPLE      | f     | eq_ref | PRIMARY            | PRIMARY            | 4       | festival.e.Festival_ID | 1    |                                                           |
++----+-------------+-------+--------+--------------------+--------------------+---------+------------------------+------+-----------------------------------------------------------+
+The execution plan you're seeing indicates that the query is still performing relatively well, but there's room for further refinement. Here's an analysis of the query plan:
+Key Observations:
+1.	sp (Spectator): The query uses the idx_visitor_ticket index, which is great for filtering the Spectator table based on Visitor_ID. The use of Using where and Using index shows that it's efficiently accessing the data, but it still has to use a filesort (which is potentially costly) to order the results.
+2.	r (Review): The idx_review_ticket index is being used for efficient lookup by Ticket_ID. This is good because it speeds up the join between Spectator and Review.
+3.	t (Ticket): The PRIMARY key is being used, which ensures a very efficient join on Ticket_ID. The Using where here indicates that it's being filtered on the Ticket_ID.
+4.	e (Event): Similarly, the PRIMARY key is being used for an efficient join with Ticket on Event_ID.
+5.	f (Festival): Again, PRIMARY key usage for the join on Festival_ID, which is optimal.
+
+
