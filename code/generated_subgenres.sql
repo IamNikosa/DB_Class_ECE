@@ -1,0 +1,21 @@
+-- Generated INSERTs for Subgenre table
+INSERT INTO Subgenre (ID, Name, Genre_ID) VALUES (1, 'Synthpop', 7);
+INSERT INTO Subgenre (ID, Name, Genre_ID) VALUES (2, 'Death Metal', 14);
+INSERT INTO Subgenre (ID, Name, Genre_ID) VALUES (3, 'Smooth Jazz', 10);
+INSERT INTO Subgenre (ID, Name, Genre_ID) VALUES (4, 'Trap', 5);
+INSERT INTO Subgenre (ID, Name, Genre_ID) VALUES (5, 'Indie Rock', 12);
+INSERT INTO Subgenre (ID, Name, Genre_ID) VALUES (6, 'Electro Swing', 7);
+INSERT INTO Subgenre (ID, Name, Genre_ID) VALUES (7, 'Boom Bap', 8);
+INSERT INTO Subgenre (ID, Name, Genre_ID) VALUES (8, 'Grime', 11);
+INSERT INTO Subgenre (ID, Name, Genre_ID) VALUES (9, 'Neo Soul', 3);
+INSERT INTO Subgenre (ID, Name, Genre_ID) VALUES (10, 'Dub', 18);
+INSERT INTO Subgenre (ID, Name, Genre_ID) VALUES (11, 'Tech House', 7);
+INSERT INTO Subgenre (ID, Name, Genre_ID) VALUES (12, 'Ska Punk', 12);
+INSERT INTO Subgenre (ID, Name, Genre_ID) VALUES (13, 'Drum and Bass', 17);
+INSERT INTO Subgenre (ID, Name, Genre_ID) VALUES (14, 'Tango Nuevo', 5);
+INSERT INTO Subgenre (ID, Name, Genre_ID) VALUES (15, 'Opera Buffa', 18);
+INSERT INTO Subgenre (ID, Name, Genre_ID) VALUES (16, 'Post-Rock', 5);
+INSERT INTO Subgenre (ID, Name, Genre_ID) VALUES (17, 'Shoegaze', 18);
+INSERT INTO Subgenre (ID, Name, Genre_ID) VALUES (18, 'Trip Hop', 20);
+INSERT INTO Subgenre (ID, Name, Genre_ID) VALUES (19, 'Bossa Nova', 19);
+INSERT INTO Subgenre (ID, Name, Genre_ID) VALUES (20, 'Glitch Hop', 1);
